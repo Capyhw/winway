@@ -1,0 +1,412 @@
+import AppKit
+import WinwayCore
+
+@MainActor
+final class EditingProbe: NSObject {
+    var events: [String] = []
+    @objc func changed(_ notification: Notification) {
+        let field = notification.object as? NSTextField
+        events.append("\(notification.name.rawValue):\(field?.accessibilityIdentifier() ?? "unidentified")")
+    }
+}
+
+@main
+struct UIComponentRunner {
+    @MainActor
+    static func main() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let probe = EditingProbe()
+        for name in [NSControl.textDidBeginEditingNotification, NSControl.textDidEndEditingNotification] {
+            NotificationCenter.default.addObserver(probe, selector: #selector(EditingProbe.changed(_:)), name: name, object: nil)
+        }
+        var actions: [ExplorerAction] = []
+        let controller = ExplorerWindowController { actions.append($0) }
+        var snapshot = ExplorerSnapshot()
+        let directory = URL(fileURLWithPath: "/tmp/winway-ui-component-test")
+        let entry = FileEntry(url: directory.appendingPathComponent("Original.txt"), name: "Original.txt", isDirectory: false)
+        snapshot.tabs = [ExplorerTab(id: snapshot.activeTabID, title: "UI component test")]
+        snapshot.directory = directory; snapshot.entries = [entry]; snapshot.selection = [entry.url]
+        snapshot.enabledCommands = Set(CommandID.allCases)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        controller.render(snapshot)
+        let originalLabel = (controller.fileTable.view(atColumn: 0, row: 0, makeIfNecessary: true) as! NSTableCellView).textField!
+        controller.beginRename()
+        precondition(originalLabel.isHidden, "Rename must hide the original filename")
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        let fields = allViews(controller.window!.contentView!).compactMap { $0 as? NSTextField }
+        let rename = fields.first { $0.accessibilityIdentifier() == "winway.rename-editor" }
+        print("Editing notifications:", probe.events)
+        print("First responder:", String(describing: controller.window!.firstResponder))
+        print("Rename field:", rename.map { "frame=\($0.frame),hidden=\($0.isHidden),editable=\($0.isEditable),editor=\(String(describing:$0.currentEditor()))" } ?? "MISSING")
+        guard let rename, !rename.isHidden, rename.isEditable,
+              let editor = rename.currentEditor() as? NSTextView, editor.isEditable else {
+            fputs("FAIL: rename field must remain visible and own an editable field editor\n", stderr)
+            exit(1)
+        }
+        editor.insertText("Renamed", replacementRange: editor.selectedRange)
+        guard editor.string == "Renamed.txt" else { fatalError("Text insertion failed: \(editor.string)") }
+        _ = controller.control(rename, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:)))
+        guard actions.contains(where: { if case .rename(let url,let name) = $0 { return url == entry.url && name == "Renamed.txt" }; return false }) else {
+            fatalError("Rename did not emit the expected URL and name")
+        }
+        guard !allViews(controller.window!.contentView!).contains(where: { $0.accessibilityIdentifier() == "winway.rename-editor" }) else { fatalError("Committed editor remained attached") }
+        precondition(!originalLabel.isHidden, "Committing rename must restore the display label")
+        func currentRenameEditor() -> (NSTextField, NSTextView) {
+            let field = allViews(controller.window!.contentView!).compactMap { $0 as? NSTextField }
+                .first { $0.accessibilityIdentifier() == "winway.rename-editor" }
+            guard let field, !field.isHidden, let text = field.currentEditor() as? NSTextView, text.isEditable else {
+                fatalError("A visible and editable rename field must remain attached")
+            }
+            return (field,text)
+        }
+        func renameCount() -> Int { actions.filter { if case .rename = $0 { return true }; return false }.count }
+        guard renameCount() == 1 else { fatalError("Duplicate initial rename action") }
+
+        // A failed filesystem rename preserves the proposed name in a new edit
+        // session. It must not focus/select twice and remove its own field.
+        snapshot.errorMessage = "名称冲突"
+        controller.render(snapshot)
+        let (retryField,retryText) = currentRenameEditor()
+        precondition(originalLabel.isHidden, "Failed rename retry must hide the original filename again")
+        guard retryText.string == "Renamed.txt", renameCount() == 1 else { fatalError("Failed rename lost input or submitted twice") }
+        _ = controller.control(retryField, textView: retryText, doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+        guard renameCount() == 1 else { fatalError("Escape submitted a rename") }
+        precondition(!originalLabel.isHidden, "Cancelling rename must restore the display label")
+        guard !allViews(controller.window!.contentView!).contains(where: { $0.accessibilityIdentifier() == "winway.rename-editor" }) else { fatalError("Cancelled editor remained attached") }
+
+        // Losing focus commits once and does not recursively seize the responder.
+        snapshot.errorMessage = nil
+        controller.render(snapshot)
+        controller.beginRename()
+        let (_,unicodeText) = currentRenameEditor()
+        unicodeText.insertText("更名", replacementRange: unicodeText.selectedRange)
+        controller.focusFiles()
+        guard renameCount() == 2 else { fatalError("Focus loss must commit exactly once") }
+        guard actions.contains(where: { if case .rename(_,let name) = $0 { return name == "更名.txt" }; return false }) else { fatalError("Unicode rename was not committed") }
+        guard controller.window?.firstResponder === controller.fileTable else { fatalError("Focus loss did not preserve the requested table responder") }
+        precondition(!originalLabel.isHidden, "Focus-loss commit must restore the display label")
+        print("PASS: unshown AppKit rename component: text insertion, one Enter submission, failed-name restoration, Escape cancellation, Unicode input, one focus-loss submission")
+        verifyNavigationScroll()
+        verifyScrollGeometry()
+        verifyRenameLayout()
+        verifyFileTextAlignment()
+        verifyColumnOverflowAndRenameVisibility()
+        verifyWindowButtons()
+        verifyMouseNavigation()
+    }
+
+    @MainActor
+    static func verifyScrollGeometry() {
+        for style: NSScroller.Style in [.legacy, .overlay] {
+            let controller = ExplorerWindowController { _ in }
+            let window = controller.window!
+            let table = controller.fileTable
+            let scroll = table.enclosingScrollView!
+            scroll.scrollerStyle = style
+            var snapshot = ExplorerSnapshot()
+            snapshot.directory = URL(fileURLWithPath: "/tmp/winway-scroll-geometry")
+            let entries = (0..<103).map { index in
+                FileEntry(url: snapshot.directory.appendingPathComponent("File-\(index).txt"), name: "File-\(index).txt", isDirectory: false)
+            }
+            func verifyBottom() {
+                let last = table.rect(ofRow: table.numberOfRows - 1)
+                precondition(table.frame.height >= last.maxY, "Document height must include the entire last row")
+                table.scrollRowToVisible(table.numberOfRows - 1)
+                let visible = table.visibleRect
+                precondition(visible.maxY >= last.maxY - 0.5 && visible.minY + scroll.contentView.contentInsets.top <= last.minY,
+                             "The last row must scroll fully above the bottom edge and any horizontal scroller")
+            }
+            // Both scrollbar modes, repeated appearance/disappearance of the
+            // vertical scroller, and narrow windows with real column overflow.
+            for width: CGFloat in [1376, 960, 1376] {
+                window.setContentSize(NSSize(width: width, height: 820))
+                window.contentView?.layoutSubtreeIfNeeded()
+                for count in [1, 103, 1, 103] {
+                    snapshot.entries = Array(entries.prefix(count))
+                    controller.render(snapshot)
+                    window.contentView?.layoutSubtreeIfNeeded()
+                    let overflow = table.frame.width > scroll.contentSize.width + 0.5
+                    precondition(overflow == (width == 960), "Only genuinely narrow columns should require horizontal scrolling")
+                    if style == .legacy {
+                        precondition(scroll.horizontalScroller?.isHidden == !overflow, "Legacy horizontal scroller visibility must match actual overflow")
+                    }
+                    verifyBottom()
+                }
+            }
+            let kindColumn = table.tableColumns.first { $0.identifier.rawValue == "kind" }!
+            let originalWidth = kindColumn.width
+            kindColumn.width = 1000
+            table.tile()
+            precondition(table.frame.width > scroll.contentSize.width, "Widened metadata columns beyond the flexible name column's minimum must remain horizontally scrollable")
+            verifyBottom()
+            kindColumn.width = originalWidth
+            table.tile()
+            snapshot.showDetails = false
+            controller.render(snapshot)
+            precondition(table.frame.width <= scroll.contentSize.width + 0.5, "Closing details must fill the wider viewport without overflow")
+            verifyBottom()
+            scroll.scrollerStyle = style == .legacy ? .overlay : .legacy
+            controller.render(snapshot)
+            verifyBottom()
+        }
+        print("PASS: scroll geometry: 103 complete rows, legacy/overlay scrollers, narrow/wide windows, short/long directories, details and scrollbar-style changes")
+    }
+
+    @MainActor
+    static func verifyColumnOverflowAndRenameVisibility() {
+        let controller = ExplorerWindowController { _ in }
+        let window = controller.window!
+        let table = controller.fileTable
+        var snapshot = ExplorerSnapshot()
+        let names = ["文件开头_" + String(repeating: "long-filename-", count: 12) + "_保留末尾.txt", "Short.txt"]
+        snapshot.entries = names.map { FileEntry(url: URL(fileURLWithPath: "/tmp/winway-overflow/\($0)"), name: $0, isDirectory: false) }
+        let editingURL = snapshot.entries[0].url
+        snapshot.selection = [editingURL]; snapshot.enabledCommands = Set(CommandID.allCases)
+        window.contentView!.layoutSubtreeIfNeeded()
+        controller.render(snapshot)
+        func label(_ column: Int, _ row: Int) -> NSTextField {
+            let cell = table.view(atColumn: column, row: row, makeIfNecessary: true) as! NSTableCellView
+            cell.layoutSubtreeIfNeeded()
+            return cell.textField!
+        }
+        for width: CGFloat in [180, 420, 200] {
+            for column in table.tableColumns { column.width = column.identifier.rawValue == "name" ? width : 90 }
+            table.layoutSubtreeIfNeeded()
+            for column in table.tableColumns.indices where !table.tableColumns[column].isHidden {
+                let text = label(column, 0)
+                let cell = text.superview!
+                precondition(text.frame.minX >= 0 && text.frame.maxX <= cell.bounds.maxX, "Text must remain inside its column after resizing")
+                precondition(text.lineBreakMode == .byTruncatingMiddle && text.cell?.isScrollable == false, "Display text must truncate in the middle instead of scrolling beyond the column")
+            }
+            precondition(label(0, 0).stringValue == names[0] && label(0, 0).toolTip == names[0], "Truncation must preserve the original filename and tooltip")
+        }
+        controller.beginRename()
+        precondition(label(0, 0).isHidden && !label(1, 0).isHidden, "Only the filename being edited should be hidden")
+        snapshot.entries.reverse()
+        controller.render(snapshot)
+        precondition(label(0, 1).isHidden && !label(0, 0).isHidden, "Reloaded cells must follow the editing URL, not the old row index")
+        controller.focusFiles()
+        precondition(!label(0, 1).isHidden, "The current display cell must be restored after a reload")
+        controller.beginRename()
+        snapshot.entries.removeAll { $0.url == editingURL }
+        snapshot.selection = []
+        controller.render(snapshot)
+        precondition(!label(0, 0).isHidden, "Removing an edited entry must not leave reused cells hidden")
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        precondition(!views(window.contentView!).contains { $0.accessibilityIdentifier() == "winway.rename-editor" }, "Removing an edited entry must dismiss its editor")
+        print("PASS: column resizing contains long text, preserves full names, and rename visibility survives reload, reordering, focus loss and entry removal")
+    }
+
+    @MainActor
+    static func verifyFileTextAlignment() {
+        let controller = ExplorerWindowController { _ in }
+        let window = controller.window!
+        var snapshot = ExplorerSnapshot()
+        snapshot.entries = ["tools", "中文文件.txt", "Report-2026.txt"].map {
+            FileEntry(url: URL(fileURLWithPath: "/tmp/winway-alignment/\($0)"), name: $0, isDirectory: false)
+        }
+        snapshot.enabledCommands = Set(CommandID.allCases)
+        let table = controller.fileTable
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        for size in [NSSize(width: 1376, height: 820), NSSize(width: 960, height: 600)] {
+            window.setContentSize(size)
+            window.contentView!.layoutSubtreeIfNeeded()
+            for row in snapshot.entries.indices {
+                snapshot.selection = [snapshot.entries[row].url]
+                controller.render(snapshot)
+                var baselines: [CGFloat] = []
+                for column in table.tableColumns.indices where !table.tableColumns[column].isHidden {
+                    let cell = table.view(atColumn: column, row: row, makeIfNecessary: true) as! NSTableCellView
+                    cell.layoutSubtreeIfNeeded()
+                    let label = cell.textField!
+                    let frame = cell.convert(label.bounds, from: label)
+                    precondition(abs(frame.midY - cell.bounds.midY) < 0.5, "File text line must be centered within the row")
+                    precondition(abs(frame.height - label.intrinsicContentSize.height) < 0.5, "Text must use its natural line height")
+                    let baseline = label.convert(NSPoint(x: 0, y: label.bounds.height - label.baselineOffsetFromBottom), to: table).y
+                    baselines.append(baseline)
+                }
+                precondition(baselines.allSatisfy { abs($0 - baselines[0]) < 0.5 }, "All columns must share a baseline")
+                controller.beginRename()
+                let field = views(window.contentView!).compactMap { $0 as? NSTextField }
+                    .first { $0.accessibilityIdentifier() == "winway.rename-editor" }!
+                let editor = field.currentEditor() as! NSTextView
+                let layout = editor.layoutManager!
+                layout.ensureLayout(for: editor.textContainer!)
+                let glyph = layout.location(forGlyphAt: 0)
+                let baseline = editor.convert(NSPoint(x: 0, y: editor.textContainerOrigin.y + glyph.y), to: table).y
+                precondition(abs(baseline - baselines[0]) < 0.5, "Entering rename must not shift the text baseline")
+                precondition(field.frame.height == 26, "Centering must preserve the rename border height")
+                _ = controller.control(field, textView: editor, doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+            }
+        }
+        print("PASS: all four file columns and rename share centered text baselines for English, Chinese and numbers at two window sizes")
+    }
+
+    @MainActor
+    static func verifyMouseNavigation() {
+        var commands: [CommandID] = []
+        let controller = ExplorerWindowController { action in
+            if case .command(let command) = action { commands.append(command) }
+        }
+        let window = controller.window!
+        var snapshot = ExplorerSnapshot()
+        snapshot.canGoBack = true; snapshot.canGoForward = true
+        snapshot.enabledCommands = [.back, .forward]
+        controller.render(snapshot)
+
+        func send(_ type: CGEventType, button: Int64) {
+            let cgEvent = CGEvent(mouseEventSource: nil, mouseType: type,
+                                  mouseCursorPosition: .zero, mouseButton: .center)!
+            cgEvent.setIntegerValueField(.mouseEventButtonNumber, value: button)
+            let event = NSEvent(cgEvent: cgEvent)!
+            precondition(event.buttonNumber == Int(button))
+            window.sendEvent(event)
+        }
+        for button: Int64 in [3, 4] {
+            send(.otherMouseDown, button: button)
+            send(.otherMouseUp, button: button)
+        }
+        precondition(commands == [.back, .forward], "Each side-button click must navigate exactly once")
+
+        for button: Int64 in [2, 5] {
+            send(.otherMouseDown, button: button)
+            send(.otherMouseUp, button: button)
+        }
+        precondition(commands == [.back, .forward], "Middle and unrelated buttons must not navigate")
+
+        snapshot.canGoBack = false
+        snapshot.enabledCommands.remove(.back)
+        controller.render(snapshot)
+        send(.otherMouseDown, button: 3)
+        precondition(commands == [.back, .forward], "Back must do nothing at the start of history")
+        send(.otherMouseDown, button: 4)
+        precondition(commands == [.back, .forward, .forward], "Available forward history must remain usable")
+        snapshot.canGoForward = false
+        snapshot.enabledCommands.remove(.forward)
+        controller.render(snapshot)
+        send(.otherMouseDown, button: 4)
+        precondition(commands.count == 3, "Forward must do nothing at the end of history")
+        print("PASS: mouse side buttons navigate once per click, respect history availability, and ignore other buttons")
+    }
+
+    @MainActor
+    static func verifyWindowButtons() {
+        let controller = ExplorerWindowController { _ in }
+        let window = controller.window!
+        let root = window.contentView!
+        let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        let buttons = kinds.map { window.standardWindowButton($0)! }
+        let sizes = buttons.map(\.frame.size)
+        for size in [NSSize(width: 1376, height: 820), NSSize(width: 960, height: 600), NSSize(width: 1600, height: 900)] {
+            window.setContentSize(size)
+            root.layoutSubtreeIfNeeded()
+            controller.render(ExplorerSnapshot())
+            window.update()
+            for (index, button) in buttons.enumerated() {
+                let frame = button.convert(button.bounds, to: root)
+                precondition(abs(frame.midY - 22) < 0.5, "Window buttons must align with the tab strip")
+                precondition(button.frame.size == sizes[index], "Native button sizes must be preserved")
+                if index == 0 { precondition(abs(frame.minX - 18) < 0.5, "Left inset must be 18 pt") }
+                var ancestor = button.superview
+                while let view = ancestor {
+                    let rect = button.convert(button.bounds, to: view)
+                    precondition(view.bounds.contains(rect), "Window button is clipped by an ancestor")
+                    ancestor = view.superview
+                }
+                let parent = button.superview!
+                let point = NSPoint(x: button.frame.midX, y: button.frame.midY)
+                precondition(parent.hitTest(point) === button, "Native button must remain clickable")
+            }
+        }
+        print("PASS: native window buttons retain size, align at 22 pt with 18 pt inset, remain unclipped and hit-testable across three window sizes")
+    }
+
+    @MainActor
+    static func verifyNavigationScroll() {
+        let controller = ExplorerWindowController { _ in }
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        var snapshot = ExplorerSnapshot()
+        func entries(_ directory: URL) -> [FileEntry] {
+            (0..<200).map { FileEntry(url: directory.appendingPathComponent("File-\($0).txt"), name: "File-\($0).txt", isDirectory: false) }
+        }
+        snapshot.directory = URL(fileURLWithPath: "/tmp/winway-scroll-A")
+        snapshot.entries = entries(snapshot.directory)
+        controller.render(snapshot)
+        let scroll = controller.fileTable.enclosingScrollView!
+        let clip = scroll.contentView
+        func offset() -> CGFloat { clip.bounds.minY + clip.contentInsets.top }
+        clip.scroll(to: NSPoint(x: 0, y: 1500))
+        let retained = offset()
+        snapshot.scrollOffset = retained
+        snapshot.statusMessage = "刷新完成"
+        controller.render(snapshot)
+        precondition(abs(offset() - retained) < 1, "Refresh must preserve scroll position")
+        snapshot.directory = URL(fileURLWithPath: "/tmp/winway-scroll-B")
+        snapshot.entries = entries(snapshot.directory)
+        snapshot.scrollOffset = 0
+        controller.render(snapshot)
+        precondition(abs(offset()) < 1, "Navigation within one tab must reset to the first row")
+        snapshot.activeTabID = UUID()
+        snapshot.scrollOffset = 480
+        controller.render(snapshot)
+        precondition(abs(offset() - 480) < 1, "Switching tabs must restore that tab's offset")
+        print("PASS: navigation resets scroll; refresh preserves it; tab switch restores it")
+    }
+
+    @MainActor
+    static func verifyRenameLayout() {
+        let controller = ExplorerWindowController { _ in }
+        controller.window?.setContentSize(NSSize(width: 960, height: 600))
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        var snapshot = ExplorerSnapshot()
+        snapshot.entries = (0..<200).map { FileEntry(url: URL(fileURLWithPath: "/tmp/winway-layout/File-\($0).txt"), name: "File-\($0).txt", isDirectory: false) }
+        snapshot.selection = [snapshot.entries[0].url]
+        snapshot.enabledCommands = Set(CommandID.allCases)
+        controller.render(snapshot)
+        let table = controller.fileTable
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        func editor() -> NSTextField {
+            guard let field = views(controller.window!.contentView!).compactMap({ $0 as? NSTextField }).first(where: { $0.accessibilityIdentifier() == "winway.rename-editor" }) else {
+                fatalError("Missing rename editor")
+            }
+            return field
+        }
+        func checkNameAlignment() {
+            let field = editor()
+            let column = table.column(withIdentifier: NSUserInterfaceItemIdentifier("name"))
+            let cell = table.frameOfCell(atColumn: column, row: 0)
+            let frame = table.convert(field.bounds, from: field)
+            precondition(abs(frame.minX - cell.minX - 32) < 1, "Editor must follow the name column")
+            precondition(abs(frame.width - (cell.width - 36)) < 1, "Editor must follow the name column width")
+        }
+        table.moveColumn(0, toColumn: 3)
+        controller.beginRename()
+        checkNameAlignment()
+        precondition(!editor().isHidden, "Reordered name column must scroll into view for editing")
+        table.tableColumns[3].width = 260
+        checkNameAlignment()
+        let movedField = editor()
+        _ = controller.control(movedField, textView: movedField.currentEditor() as! NSTextView, doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+        table.moveColumn(3, toColumn: 0)
+        controller.beginRename()
+        checkNameAlignment()
+        let scroll = table.enclosingScrollView!
+        scroll.contentView.scroll(to: NSPoint(x: 200, y: 10))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+        let field = editor()
+        let overlay = field.superview!
+        precondition(overlay.layer?.masksToBounds == true, "Rename viewport must clip its editor and field editor")
+        let viewport = table.visibleRect.intersection(table.bounds)
+        let overlayRect = table.convert(overlay.bounds, from: overlay)
+        precondition(overlayRect.equalTo(viewport), "Clip container must exactly follow the file viewport")
+        precondition(field.frame.minX < 0 && field.frame.minY < 0, "Fixture must exercise partial clipping on both axes")
+        let exposed = overlay.convert(field.bounds, from: field).intersection(overlay.bounds)
+        precondition(!exposed.isEmpty, "Partially visible editor must stay usable")
+        precondition(overlay.hitTest(NSPoint(x: overlay.frame.maxX - 1, y: overlay.frame.maxY - 1)) == nil, "Empty overlay must pass pointer events to the list")
+        guard let text = field.currentEditor() as? NSTextView else { fatalError("Clipping must preserve editing focus") }
+        _ = controller.control(field, textView: text, doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+        precondition(overlay.superview == nil, "Closing the editor must detach its overlay")
+        print("PASS: 960x600 rename follows column reorder/resize, clips both axes, preserves focus and passes pointer events")
+    }
+}
