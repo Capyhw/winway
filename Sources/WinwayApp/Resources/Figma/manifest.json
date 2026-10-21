@@ -1,0 +1,138 @@
+[
+  {
+    "name": "imgIconPc",
+    "assetHash": "d0b4f94d39fef605c3991e8c5faed2d10d5bf95a.svg"
+  },
+  {
+    "name": "imgIconView",
+    "assetHash": "526587e49d129d0bf83364126ac58e58a4d553fb.svg"
+  },
+  {
+    "name": "imgIconDocument",
+    "assetHash": "3f73a1f59e93cbac601a414b6dcc1eb75dbb826d.svg"
+  },
+  {
+    "name": "imgIconExcel",
+    "assetHash": "efc9d3510448a62808e9fc558c10022db9fec5fa.svg"
+  },
+  {
+    "name": "imgIconWord",
+    "assetHash": "9c32a8b8036cb7391fca3dd9fc59d7a13607b6ef.svg"
+  },
+  {
+    "name": "imgIconFolder",
+    "assetHash": "a5a550481e6d180a0b15340230c4cc0be00d481a.svg"
+  },
+  {
+    "name": "imgIconNetwork",
+    "assetHash": "711dd3f06213952c14085c8cbdae42f421cdb669.svg"
+  },
+  {
+    "name": "imgIconDrive",
+    "assetHash": "493a84720d732d317fc4323e6d0620913cbe6fc9.svg"
+  },
+  {
+    "name": "imgIconVideo",
+    "assetHash": "99ae353e553a78b0eed2c86d642cdc7824cf928e.svg"
+  },
+  {
+    "name": "imgIconMusic",
+    "assetHash": "6c15febbdb6f59d9e1243d237f6e4bf3a5ca2d6e.svg"
+  },
+  {
+    "name": "imgIconGallery",
+    "assetHash": "c0f936b0c5834cffbcc3a55bc220f6d5d0575ff8.svg"
+  },
+  {
+    "name": "imgIconDownload",
+    "assetHash": "e922d68e4ad4906a8b54a6a79a849c1770182dc6.svg"
+  },
+  {
+    "name": "imgIconCloud",
+    "assetHash": "f1348ccb3f2a8803c41298d53c9a221f87bc3979.svg"
+  },
+  {
+    "name": "imgIconHome",
+    "assetHash": "77a8b4db590dc4e3916d9c159a6a28634f83ce1e.svg"
+  },
+  {
+    "name": "imgIconMore",
+    "assetHash": "8111b3d46f54af4792ab0e57ea64f9411ac696c0.svg"
+  },
+  {
+    "name": "imgIconDown",
+    "assetHash": "2dcebcf4cfb943b5a29c2f5943567c2f2df7230b.svg"
+  },
+  {
+    "name": "imgIconSort",
+    "assetHash": "ffe3909fbdaf066e0a9d474d30a0ba6f44764585.svg"
+  },
+  {
+    "name": "imgIconDelete",
+    "assetHash": "f89d74e29981eac750b39ff495173a077914d5c5.svg"
+  },
+  {
+    "name": "imgIconRename",
+    "assetHash": "ef459153c57044c9f5396d113ab57f7f37818db5.svg"
+  },
+  {
+    "name": "imgIconPaste",
+    "assetHash": "ef5170c875603b9add23c842997c0b37616c5ec1.svg"
+  },
+  {
+    "name": "imgIconCopy",
+    "assetHash": "8c29084a81fa030e356a16a74295ac2e7c77e667.svg"
+  },
+  {
+    "name": "imgIconCut",
+    "assetHash": "44e5d8ca341f92086231fa7a660d409d06722f11.svg"
+  },
+  {
+    "name": "imgIconPlus",
+    "assetHash": "06702456c83e4b8f14feaeca8dca80a87b7ecc27.svg"
+  },
+  {
+    "name": "imgIconSearch",
+    "assetHash": "572c4455d7d7fdb7f2a2dd3c8bacfd5d4c216270.svg"
+  },
+  {
+    "name": "imgIconRight",
+    "assetHash": "239a10cebcf75b83e2a470a793f89b72dedf2c6c.svg"
+  },
+  {
+    "name": "imgIconUp",
+    "assetHash": "b25333b0782d1412bf2fdf3a89b20f642bd7260f.svg"
+  },
+  {
+    "name": "imgIconForward",
+    "assetHash": "a781ca981a72e3eb8e4a57dba1468ab3d884bb84.svg"
+  },
+  {
+    "name": "imgIconBack",
+    "assetHash": "dffd5fc81babc50bdfc7456aa5efc43c51895e0a.svg"
+  },
+  {
+    "name": "imgIconClose",
+    "assetHash": "7c985311f7b4fb94ce96e9b3e37fdc733f5bd251.svg"
+  },
+  {
+    "name": "imgMacOsWindowControls",
+    "assetHash": "2b20119b8a493137dc80ce4c2d26c2631cab2ae7.svg"
+  },
+  {
+    "name": "imgPinnedShortcut",
+    "assetHash": "cc2c5e195b99237e61aef5bd8cdf983aa7c7b675.svg"
+  },
+  {
+    "name": "img",
+    "assetHash": "3fbf6ea99bca40e9b78ad55f268e842090b0f3de.svg"
+  },
+  {
+    "name": "imgIconPdf",
+    "assetHash": "ca4b3f577a285a415e530046cc3f1395ab587a7e.svg"
+  },
+  {
+    "name": "imgIconWord1",
+    "assetHash": "593cce21b6094c5075f2a795eb39fbf90d327176.svg"
+  }
+]

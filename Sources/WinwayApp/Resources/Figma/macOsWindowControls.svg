@@ -1,0 +1,7 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="96" height="44" viewBox="0 0 96 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="macOS / Window controls">
+<path id="Close" d="M11.75 22C11.75 25.1756 9.17564 27.75 6 27.75C2.82436 27.75 0.25 25.1756 0.25 22C0.25 18.8244 2.82436 16.25 6 16.25C9.17564 16.25 11.75 18.8244 11.75 22Z" fill="#FF5F57" stroke-width="0.5" stroke="#E0443E"/>
+<path id="Minimize" d="M31.75 22C31.75 25.1756 29.1756 27.75 26 27.75C22.8244 27.75 20.25 25.1756 20.25 22C20.25 18.8244 22.8244 16.25 26 16.25C29.1756 16.25 31.75 18.8244 31.75 22Z" fill="#FEBC2E" stroke-width="0.5" stroke="#DEA123"/>
+<path id="Zoom / Full screen" d="M51.75 22C51.75 25.1756 49.1756 27.75 46 27.75C42.8244 27.75 40.25 25.1756 40.25 22C40.25 18.8244 42.8244 16.25 46 16.25C49.1756 16.25 51.75 18.8244 51.75 22Z" fill="#28C840" stroke-width="0.5" stroke="#1FAA34"/>
+</g>
+</svg>
