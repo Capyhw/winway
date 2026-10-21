@@ -24,3 +24,5 @@ trap 'rm -rf "$bundle_check_root"' EXIT
   -o "$bundle_check_root/bundle-runner"
 cd "$bundle_check_root"
 "$bundle_check_root/bundle-runner" "$bundle_check_root/Winway.app"
+# Exercise the production resource accessor as well as inspecting bundle files.
+"$bundle_check_root/Winway.app/Contents/MacOS/Winway" --check-resources

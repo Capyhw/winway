@@ -1,0 +1,103 @@
+name: Release macOS
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      # Xcode 26.3 uses the native SwiftPM backend; local Swift 6.4 keeps swiftbuild.
+      WINWAY_BUILD_SYSTEM: native
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check toolchain
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          test "$(uname -m)" = "$EXPECTED_ARCH"
+          xcodebuild -version
+          xcrun swift --version
+      - name: Run core tests
+        run: ./scripts/test.sh
+      - name: Build and verify packages
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            ./scripts/package-release.sh "$GITHUB_REF_NAME"
+          else
+            ./scripts/package-release.sh
+          fi
+      - name: Run tab and UI regression tests
+        run: |
+          ./scripts/test-tabs.sh
+          ./scripts/test-ui-components.sh
+      - name: Upload packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: winway-macos-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: winway-macos-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify both architectures
+        run: |
+          cd release-assets
+          for arch in arm64 x86_64; do
+            name="Winway-${GITHUB_REF_NAME#v}-macos-${arch}"
+            test -s "$name.zip"
+            test -s "$name.dmg"
+            sha256sum -c "$name.sha256"
+          done
+      - name: Publish packages and release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          options=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            options+=(--prerelease --latest=false)
+          fi
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --verify-tag --title "Winway $GITHUB_REF_NAME" \
+            --generate-notes --notes-file .github/release-notes.md "${options[@]}"

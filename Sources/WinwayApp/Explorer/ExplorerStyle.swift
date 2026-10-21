@@ -3,6 +3,13 @@ import WinwayCore
 
 @MainActor
 enum ExplorerStyle {
+    // SwiftPM backends generate different Bundle.module lookup paths. Prefer
+    // the standard macOS app location so packaged apps never need the checkout.
+    static let resourceBundle: Bundle = {
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("Winway_WinwayApp.bundle"),
+           let bundle = Bundle(url: url) { return bundle }
+        return Bundle.module
+    }()
     static let text = NSColor(hex: 0x1b2434)
     static let secondary = NSColor(hex: 0x68758a)
     static let border = NSColor(hex: 0xdfe6ef)
@@ -25,7 +32,7 @@ enum ExplorerStyle {
     static func sortImage(ascending: Bool) -> NSImage? {
         let name = ascending ? "chevron-up" : "chevron-down"
         if let cached = imageCache[name] { return cached }
-        guard let url = Bundle.module.url(forResource: name, withExtension: "svg", subdirectory: "Resources/Lucide"),
+        guard let url = resourceBundle.url(forResource: name, withExtension: "svg", subdirectory: "Resources/Lucide"),
               let source = NSImage(contentsOf: url) else { return nil }
         let color = accent
         let image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
@@ -40,7 +47,7 @@ enum ExplorerStyle {
     static func image(_ name: String, size: CGFloat = 20) -> NSImage? {
         let key = "\(name):\(size)"
         if let cached = imageCache[key] { return cached }
-        guard let url = Bundle.module.url(forResource: name+"@2x", withExtension: "png", subdirectory: "Resources/Figma"),
+        guard let url = resourceBundle.url(forResource: name+"@2x", withExtension: "png", subdirectory: "Resources/Figma"),
               let image = NSImage(contentsOf: url) else { return nil }
         image.size = NSSize(width: size, height: size)
         imageCache[key] = image

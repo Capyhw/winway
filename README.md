@@ -17,7 +17,9 @@ open dist/Winway.app
 
 可用 `./scripts/test.sh --filter KeyboardTests` 运行单套测试。常规测试包含文件服务、快捷键、导航与 10,000 项目录状态的排序/过滤和选择；这不代表已完成原生窗口滚动性能验收。真实卷测试需单独提供专用测试夹具，缺少夹具时明确跳过。独立备用测试脚本及实际验收范围见 `docs/` 和 `artifacts/`。普通构建不依赖 Node、Rust 或完整 Xcode。
 
-`./scripts/build-app.sh debug` 可打包调试版本。脚本只作本机 ad-hoc 签名；没有 Developer ID 签名、公证或自动发布。
+`./scripts/build-app.sh debug` 可打包调试版本。脚本只作本机 ad-hoc 签名；没有 Developer ID 签名或公证。
+
+GitHub Release 自动打包已配置：推送 `v0.1.0` 这类版本标签后，分别构建 Apple Silicon 和 Intel 的 ZIP、DMG 与 SHA-256 校验文件，通过检查后发布 Release。也可在 Actions 中手动运行 **Release macOS**，仅生成测试包。详细步骤和签名限制见 [发布说明](docs/releasing.md)。
 
 开发及打包统一通过 `scripts/build.sh`，使用当前推荐的 `swiftbuild` 后端和 `xcrun` 选中的 macOS SDK，最低支持版本仍为 macOS 13。当前 Swift 6.4 / CLT 即使指定 SDK 27.0，也会在默认链接步骤中记录 SDK 13.0，触发旧版控件外观；脚本通过链接器的 `-platform_version` 参数，分别传入最低系统版本和实际 SDK 版本。打包前会校验二进制的两项版本，不符时停止打包。后续升级工具链时可重新验证是否还需要显式链接参数。
 

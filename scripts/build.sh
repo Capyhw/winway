@@ -8,6 +8,6 @@ minimum_macos="$(plutil -extract LSMinimumSystemVersion raw "$project_root/Packa
 # records the deployment target as the SDK version, enabling legacy controls.
 # Pass the actual compile SDK and minimum OS separately to the linker.
 exec xcrun swift build --package-path "$project_root" \
-  --build-system swiftbuild --sdk "$macos_sdk" \
+  --build-system "${WINWAY_BUILD_SYSTEM:-swiftbuild}" --sdk "$macos_sdk" \
   -Xlinker -platform_version -Xlinker macos \
   -Xlinker "$minimum_macos" -Xlinker "$macos_sdk_version" "$@"

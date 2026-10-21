@@ -4,6 +4,18 @@ import WinwayCore
 @main
 struct WinwayMain {
     @MainActor static func main() {
+        if CommandLine.arguments.contains("--check-resources") {
+            let bundle = ExplorerStyle.resourceBundle
+            let appRoot = Bundle.main.bundleURL.resolvingSymlinksInPath().path + "/"
+            guard bundle.bundleURL.resolvingSymlinksInPath().path.hasPrefix(appRoot),
+                  ExplorerStyle.image("folder") != nil,
+                  ExplorerStyle.sortImage(ascending: true) != nil else {
+                FileHandle.standardError.write(Data("Packaged resource lookup failed\n".utf8))
+                exit(1)
+            }
+            print("Packaged resource lookup passed: \(bundle.bundleURL.path)")
+            return
+        }
         let application = NSApplication.shared
         application.setActivationPolicy(.regular)
         let delegate = AppDelegate()
