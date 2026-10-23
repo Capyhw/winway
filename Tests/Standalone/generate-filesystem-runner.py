@@ -13,6 +13,8 @@ import re
 names=re.findall(r'func (test\w+)\(\) async throws', s)
 conditional = {
     'testRealCrossVolumeMoveIfFixtureMounted': 'WINWAY_TEST_VOLUME',
+    'testMutationDuringCrossVolumeMovePreservesSource': 'WINWAY_TEST_VOLUME',
+    'testSourceChangedDuringMoveConflictIsRestored': 'WINWAY_TEST_VOLUME',
     'testReadOnlyVolumeFailurePreservesSourceIfMounted': 'WINWAY_TEST_READONLY_VOLUME',
     'testDisconnectedVolumeIsNotEmptyIfFixtureProvided': 'WINWAY_TEST_DISCONNECTED_PATH',
 }

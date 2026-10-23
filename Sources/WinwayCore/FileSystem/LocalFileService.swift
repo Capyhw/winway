@@ -140,39 +140,34 @@ public final class LocalFileService: FileServing, @unchecked Sendable {
                     var target = request.destination.appendingPathComponent(source.lastPathComponent)
                     do {
                         try self.validateDestination(source, request.destination, kind: request.kind)
-                        var shouldSkip = false
-                        // Exclusive rename remains the final authority if another process creates a target after this check.
-                        while try self.nameOccupied(target) {
+                        func nextTarget(afterConflict target: URL) throws -> URL? {
                             progress(.awaitingConflict, source)
                             let choice = self.waitForConflict(FileConflict(source: source, destination: target), cancellation: cancellation, resolve: resolveConflict)
                             switch choice {
-                            case .skip: shouldSkip = true
-                            case .cancel: cancellation.cancel()
-                            case .keepBoth: target = try self.availableName(request.destination.appendingPathComponent(source.lastPathComponent))
+                            case .skip: return nil
+                            case .cancel: cancellation.cancel(); return nil
+                            case .keepBoth:
+                                let next = try self.availableName(request.destination.appendingPathComponent(source.lastPathComponent))
+                                progress(.running, source)
+                                return next
                             }
-                            if shouldSkip || cancellation.isCancelled { break }
+                        }
+                        var shouldSkip = false
+                        // Exclusive rename remains the final authority if another process creates a target after this check.
+                        while try self.nameOccupied(target) {
+                            guard let next = try nextTarget(afterConflict: target) else {
+                                shouldSkip = !cancellation.isCancelled
+                                break
+                            }
+                            target = next
+                            if cancellation.isCancelled { break }
                         }
                         if shouldSkip || cancellation.isCancelled {
                             results.append(FileItemResult(source: source, destination: nil, outcome: shouldSkip ? .skipped : .cancelled, error: nil, residualURLs: []))
                         } else {
                             progress(.running, source)
-                            var result = self.transferItem(source, target, kind: request.kind, cancellation: cancellation)
-                            // A target may appear during copy. Ask again instead of overwriting or hiding that late conflict.
-                            while result.error?.code == .conflict && result.residualURLs.isEmpty && !cancellation.isCancelled {
-                                progress(.awaitingConflict, source)
-                                switch self.waitForConflict(FileConflict(source: source, destination: target), cancellation: cancellation, resolve: resolveConflict) {
-                                case .skip:
-                                    result = FileItemResult(source: source, destination: nil, outcome: .skipped, error: nil, residualURLs: [])
-                                case .cancel:
-                                    cancellation.cancel()
-                                    result = FileItemResult(source: source, destination: nil, outcome: .cancelled, error: nil, residualURLs: [])
-                                case .keepBoth:
-                                    target = try self.availableName(request.destination.appendingPathComponent(source.lastPathComponent))
-                                    progress(.running, source)
-                                    result = self.transferItem(source, target, kind: request.kind, cancellation: cancellation)
-                                }
-                            }
-                            results.append(result)
+                            results.append(self.transferItem(source, target, kind: request.kind, cancellation: cancellation,
+                                                             resolveConflict: nextTarget(afterConflict:)))
                         }
                     } catch {
                         results.append(FileItemResult(source: source, destination: nil, outcome: .failed, error: self.map(error, source), residualURLs: []))
@@ -188,30 +183,41 @@ public final class LocalFileService: FileServing, @unchecked Sendable {
         }
     }
 
-    private func transferItem(_ source: URL, _ target: URL, kind: FileTransferKind, cancellation: FileOperationCancellation) -> FileItemResult {
+    private func transferItem(_ source: URL, _ initialTarget: URL, kind: FileTransferKind,
+                              cancellation: FileOperationCancellation,
+                              resolveConflict: (URL) throws -> URL?) -> FileItemResult {
         let fm = FileManager.default
+        var target = initialTarget
         var temporary: URL?
         var committed = false
         var quarantine: URL?
+        func skippedResult() -> FileItemResult {
+            FileItemResult(source: source, destination: nil,
+                           outcome: cancellation.isCancelled ? .cancelled : .skipped, error: nil, residualURLs: [])
+        }
         do {
             let sourceInfo = try statLink(source)
             let targetDirectoryInfo = try statFollowing(target.deletingLastPathComponent())
             if kind == .move && sourceInfo.st_dev == targetDirectoryInfo.st_dev {
-                if cancellation.isCancelled { throw FileServiceError(.cancelled, "任务已取消") }
-                try exclusiveRename(source, target)
+                guard try commit(source, to: &target, cancellation: cancellation, resolveConflict: resolveConflict) else { return skippedResult() }
             } else {
-                let before = try snapshot(source)
+                // Only a cross-volume move needs verification before deleting its source.
+                let before = kind == .move ? try snapshot(source) : nil
                 let staging = target.deletingLastPathComponent().appendingPathComponent(".winway-copy-\(UUID().uuidString)")
                 temporary = staging
                 try fm.copyItem(at: source, to: staging)
-                let copied = try snapshot(staging)
-                guard before == (try snapshot(source)) else { throw FileServiceError(.sourceChanged, "复制期间源项目发生变化；未删除源项目。", path: source.path) }
-                guard before.content == copied.content else { throw FileServiceError(.io, "副本内容或元数据校验不一致；源文件已保留。", path: source.path) }
-                if cancellation.isCancelled { throw FileServiceError(.cancelled, "任务已取消，源项目保持不变。") }
-                guard try !nameOccupied(target) else { throw conflict(target) }
-                try exclusiveRename(staging, target)
+                if let before {
+                    let copied = try snapshot(staging)
+                    guard before == (try snapshot(source)) else { throw FileServiceError(.sourceChanged, "复制期间源项目发生变化；未删除源项目。", path: source.path) }
+                    guard before.matchesCopy(copied) else { throw FileServiceError(.io, "副本内容或元数据校验不一致；源文件已保留。", path: source.path) }
+                }
+                guard try commit(staging, to: &target, cancellation: cancellation, resolveConflict: resolveConflict) else {
+                    try fm.removeItem(at: staging)
+                    temporary = nil
+                    return skippedResult()
+                }
                 temporary = nil; committed = true
-                if kind == .move {
+                if let before {
                     // Atomically claim the same directory entry before deleting; an externally replaced source is never removed.
                     let held = source.deletingLastPathComponent().appendingPathComponent(".winway-move-\(UUID().uuidString)")
                     try exclusiveRename(source, held)
@@ -238,6 +244,23 @@ public final class LocalFileService: FileServing, @unchecked Sendable {
             }
             return FileItemResult(source: source, destination: committed ? target : nil,
                                   outcome: mapped.code == .cancelled ? .cancelled : .failed, error: mapped, residualURLs: residuals)
+        }
+    }
+
+    /// Keep the prepared copy while resolving late conflicts; retry only the rename.
+    private func commit(_ prepared: URL, to target: inout URL, cancellation: FileOperationCancellation,
+                        resolveConflict: (URL) throws -> URL?) throws -> Bool {
+        while true {
+            if cancellation.isCancelled { throw FileServiceError(.cancelled, "任务已取消，源项目保持不变。") }
+            do {
+                guard try !nameOccupied(target) else { throw conflict(target) }
+                try exclusiveRename(prepared, target)
+                return true
+            } catch {
+                guard (error as? FileServiceError)?.code == .conflict else { throw error }
+                guard let next = try resolveConflict(target) else { return false }
+                target = next
+            }
         }
     }
 
@@ -339,12 +362,28 @@ public final class LocalFileService: FileServing, @unchecked Sendable {
         var content: [String: Content] = [:]
         var identities: [String: String] = [:]
         var changes: [String: String] = [:]
+
+        func matchesCopy(_ copy: Snapshot) -> Bool {
+            content.count == copy.content.count && content.allSatisfy { path, original in
+                guard let copied = copy.content[path] else { return false }
+                return original.matchesCopy(copied)
+            }
+        }
     }
-    private struct Content: Equatable {
+    struct Content: Equatable {
         let mode: mode_t
         let modified: String
         let digest: String
         let attributes: [String: Data]
+
+        func matchesCopy(_ copy: Content) -> Bool {
+            // macOS can assign a new provenance value to the copy. Keep it in the
+            // full snapshot so source mutation checks still compare every attribute.
+            let originalAttributes = attributes.filter { $0.key != "com.apple.provenance" }
+            let copiedAttributes = copy.attributes.filter { $0.key != "com.apple.provenance" }
+            return mode == copy.mode && modified == copy.modified && digest == copy.digest
+                && originalAttributes == copiedAttributes
+        }
     }
     private func snapshot(_ root: URL) throws -> Snapshot {
         var result = Snapshot()

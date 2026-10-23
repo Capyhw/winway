@@ -179,6 +179,60 @@ final class FileSystemTests: @unchecked Sendable {
         #expect(FileManager.default.fileExists(atPath: source.path))
     }
 
+    @Test func testCopyComparisonOnlyAllowsSystemProvenanceChanges() async throws {
+        let metadata = Data("metadata".utf8)
+        let originalAttributes = ["com.apple.provenance": Data([1]), "com.winway.fixture": metadata]
+        let copiedAttributes = ["com.apple.provenance": Data([2]), "com.winway.fixture": metadata]
+        let original = LocalFileService.Content(mode: 0o100640, modified: "123.456", digest: "payload", attributes: originalAttributes)
+        let copy = LocalFileService.Content(mode: original.mode, modified: original.modified, digest: original.digest, attributes: copiedAttributes)
+        #expect(original.matchesCopy(copy))
+        #expect(original != copy) // Source mutation checks must remain strict.
+
+        let withoutProvenance = LocalFileService.Content(mode: original.mode, modified: original.modified, digest: original.digest, attributes: ["com.winway.fixture": metadata])
+        #expect(original.matchesCopy(withoutProvenance))
+        #expect(withoutProvenance.matchesCopy(original))
+        for changed in [
+            LocalFileService.Content(mode: 0o100600, modified: original.modified, digest: original.digest, attributes: copiedAttributes),
+            LocalFileService.Content(mode: original.mode, modified: "124.456", digest: original.digest, attributes: copiedAttributes),
+            LocalFileService.Content(mode: original.mode, modified: original.modified, digest: "corrupt", attributes: copiedAttributes),
+            LocalFileService.Content(mode: original.mode, modified: original.modified, digest: original.digest, attributes: [:]),
+            LocalFileService.Content(mode: original.mode, modified: original.modified, digest: original.digest, attributes: ["com.winway.fixture": Data("changed".utf8)]),
+            LocalFileService.Content(mode: original.mode, modified: original.modified, digest: original.digest, attributes: copiedAttributes.merging(["com.apple.quarantine": Data([1])]) { _, new in new })
+        ] {
+            #expect(!original.matchesCopy(changed))
+        }
+    }
+
+    @Test func testSameDirectoryKeepBothWithSystemProvenance() async throws {
+        let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        let service = LocalFileService()
+        let file = root.appendingPathComponent("memory-guide.html")
+        try write("<html>payload</html>", file)
+        let provenance = Data([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        #expect(provenance.withUnsafeBytes { setxattr(file.path, "com.apple.provenance", $0.baseAddress, provenance.count, 0, 0) } == 0)
+        // The OS can normalize this protected attribute as it is written.
+        var storedProvenance = Data(count: provenance.count)
+        #expect(storedProvenance.withUnsafeMutableBytes { getxattr(file.path, "com.apple.provenance", $0.baseAddress, provenance.count, 0, 0) } == provenance.count)
+        let metadata = Data("preserved metadata".utf8)
+        #expect(metadata.withUnsafeBytes { setxattr(file.path, "com.winway.fixture", $0.baseAddress, metadata.count, 0, 0) } == 0)
+
+        for number in 2...3 {
+            let report = await service.transfer(.init(sources: [file], destination: root, kind: .copy), resolveConflict: { _ in .keepBoth })
+            #expect(report.succeeded == 1, "\(report.results)")
+            let output = try #require(report.results.first?.destination)
+            #expect(output.lastPathComponent == "memory-guide (\(number)).html")
+            #expect(try Data(contentsOf: output) == Data(contentsOf: file))
+            var copiedMetadata = Data(count: metadata.count)
+            #expect(copiedMetadata.withUnsafeMutableBytes { getxattr(output.path, "com.winway.fixture", $0.baseAddress, metadata.count, 0, 0) } == metadata.count)
+            #expect(copiedMetadata == metadata)
+        }
+        var originalProvenance = Data(count: provenance.count)
+        #expect(originalProvenance.withUnsafeMutableBytes { getxattr(file.path, "com.apple.provenance", $0.baseAddress, provenance.count, 0, 0) } == provenance.count)
+        #expect(originalProvenance == storedProvenance)
+        #expect(try String(contentsOf: file, encoding: .utf8) == "<html>payload</html>")
+        #expect(!(try FileManager.default.contentsOfDirectory(atPath: root.path).contains { $0.hasPrefix(".winway-") }))
+    }
+
     @Test func testConflictChoicesPartialFailureAndRepeatProtection() async throws {
         let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
         let service = LocalFileService()
@@ -262,16 +316,62 @@ final class FileSystemTests: @unchecked Sendable {
         try write("source", source)
         let targetFile = target.appendingPathComponent("race")
         let counter = ProgressCounter()
+        let conflicts = ProgressCounter()
         let report = await service.transfer(.init(sources: [source], destination: target, kind: .copy), onProgress: { progress in
-            if progress.state == .running && progress.currentSource != nil && counter.increment() == 2 {
-                try! Data("competitor".utf8).write(to: targetFile)
+            if progress.state == .running && progress.currentSource != nil {
+                switch counter.increment() {
+                case 2: try! Data("competitor".utf8).write(to: targetFile)
+                case 3: try! Data("another competitor".utf8).write(to: target.appendingPathComponent("race (2)"))
+                default: break
+                }
             }
-        }, resolveConflict: { _ in .keepBoth })
+        }, resolveConflict: { _ in
+            _ = conflicts.increment()
+            let staged = try! FileManager.default.contentsOfDirectory(at: target, includingPropertiesForKeys: nil).filter { $0.lastPathComponent.hasPrefix(".winway-copy-") }
+            #expect(staged.count == 1)
+            if let copy = staged.first {
+                #expect(try! String(contentsOf: copy, encoding: .utf8) == "source")
+            }
+            // A retry must commit the already prepared copy, not reread this changed source.
+            try! Data("changed after copying".utf8).write(to: source)
+            return .keepBoth
+        })
         #expect((report.results.first?.outcome) == (.succeeded))
-        #expect((report.results.first?.destination?.lastPathComponent) == ("race (2)"))
+        #expect(conflicts.increment() == 3)
+        #expect((report.results.first?.destination?.lastPathComponent) == ("race (3)"))
         #expect((try String(contentsOf: targetFile, encoding: .utf8)) == ("competitor"))
-        #expect(FileManager.default.fileExists(atPath: source.path))
+        #expect(try String(contentsOf: target.appendingPathComponent("race (2)"), encoding: .utf8) == "another competitor")
+        #expect(try String(contentsOf: target.appendingPathComponent("race (3)"), encoding: .utf8) == "source")
+        #expect(try String(contentsOf: source, encoding: .utf8) == "changed after copying")
         #expect(!(try FileManager.default.contentsOfDirectory(atPath: target.path).contains { $0.hasPrefix(".winway-") }))
+    }
+
+    @Test func testLateConflictSkipAndCancelPreserveFilesAndCleanStaging() async throws {
+        for kind in [FileTransferKind.copy, .move] {
+            for choice in [FileConflictChoice.skip, .cancel, .keepBoth] {
+                let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+                let service = LocalFileService()
+                let target = try await service.createDirectory(in: root, name: "target")
+                let source = root.appendingPathComponent("file.txt")
+                let pending = root.appendingPathComponent("pending.txt")
+                try write("source", source); try write("pending", pending)
+                let counter = ProgressCounter()
+                let cancellation = FileOperationCancellation()
+                let report = await service.transfer(.init(sources: [source, pending], destination: target, kind: kind), cancellation: cancellation, onProgress: { progress in
+                    if progress.state == .running && progress.currentSource == source && counter.increment() == 2 {
+                        try! Data("competitor".utf8).write(to: target.appendingPathComponent("file.txt"))
+                    }
+                }, resolveConflict: { _ in
+                    if choice == .keepBoth { cancellation.cancel() }
+                    return choice
+                })
+                #expect(report.results.map(\.outcome) == (choice == .skip ? [.skipped, .succeeded] : [.cancelled, .cancelled]))
+                #expect(report.results.allSatisfy { $0.residualURLs.isEmpty })
+                #expect(try String(contentsOf: source, encoding: .utf8) == "source")
+                #expect(try String(contentsOf: target.appendingPathComponent("file.txt"), encoding: .utf8) == "competitor")
+                #expect(!(try FileManager.default.contentsOfDirectory(atPath: target.path).contains { $0.hasPrefix(".winway-") }))
+            }
+        }
     }
 
     @Test func testUnicodeAndCaseCollisionAreRejected() async throws {
@@ -314,16 +414,45 @@ final class FileSystemTests: @unchecked Sendable {
         #expect(!(try FileManager.default.contentsOfDirectory(atPath: root.path).contains { $0.hasPrefix(".winway-") }))
     }
 
-    @Test func testMutationDuringCopyPreservesSource() async throws {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["WINWAY_TEST_VOLUME"] != nil)) func testSourceChangedDuringMoveConflictIsRestored() async throws {
+        guard let path = ProcessInfo.processInfo.environment["WINWAY_TEST_VOLUME"] else { return }
         let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
         let service = LocalFileService()
-        let target = try await service.createDirectory(in: root, name: "target")
+        let target = try await service.createDirectory(in: URL(fileURLWithPath: path), name: "conflict-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: target) }
+        let source = root.appendingPathComponent("file.txt")
+        try write("original", source)
+        let counter = ProgressCounter()
+        let report = await service.transfer(.init(sources: [source], destination: target, kind: .move), onProgress: { progress in
+            if progress.state == .running && progress.currentSource != nil && counter.increment() == 2 {
+                try! Data("competitor".utf8).write(to: target.appendingPathComponent("file.txt"))
+            }
+        }, resolveConflict: { _ in
+            try! Data("edited while deciding".utf8).write(to: source)
+            return .keepBoth
+        })
+        let copy = target.appendingPathComponent("file (2).txt")
+        #expect(report.results.first?.error?.code == .sourceChanged)
+        #expect(report.results.first?.residualURLs == [copy])
+        #expect(try String(contentsOf: source, encoding: .utf8) == "edited while deciding")
+        #expect(try String(contentsOf: copy, encoding: .utf8) == "original")
+        #expect(try String(contentsOf: target.appendingPathComponent("file.txt"), encoding: .utf8) == "competitor")
+        #expect(!(try FileManager.default.contentsOfDirectory(atPath: root.path).contains { $0.hasPrefix(".winway-") }))
+        #expect(!(try FileManager.default.contentsOfDirectory(atPath: target.path).contains { $0.hasPrefix(".winway-") }))
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["WINWAY_TEST_VOLUME"] != nil)) func testMutationDuringCrossVolumeMovePreservesSource() async throws {
+        guard let path = ProcessInfo.processInfo.environment["WINWAY_TEST_VOLUME"] else { return }
+        let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        let service = LocalFileService()
+        let target = try await service.createDirectory(in: URL(fileURLWithPath: path), name: "mutation-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: target) }
         let source = root.appendingPathComponent("changing")
         try Data(repeating: 65, count: 16 * 1_048_576).write(to: source)
         let count = ProgressCounter()
         let stop = FileOperationCancellation()
         let completed = DispatchSemaphore(value: 0)
-        let report = await service.transfer(.init(sources: [source], destination: target, kind: .copy), onProgress: { progress in
+        let report = await service.transfer(.init(sources: [source], destination: target, kind: .move), onProgress: { progress in
             if progress.state == .running && progress.currentSource != nil && count.increment() == 2 {
                 DispatchQueue.global().async {
                     defer { completed.signal() }
