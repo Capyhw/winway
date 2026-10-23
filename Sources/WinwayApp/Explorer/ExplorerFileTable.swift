@@ -37,7 +37,6 @@ final class ExplorerFileTable: NSTableView {
     var contextID = UUID()
     var rowURLs: [URL] = []
     private var anchors: [UUID: URL] = [:]
-    private var rubberBand: NSRect?
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { deselectAll(nil); return }
@@ -45,7 +44,6 @@ final class ExplorerFileTable: NSTableView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(self)
         let origin = convert(event.locationInWindow, from: nil)
         let hitRow = row(at: origin)
         let additive = event.modifierFlags.contains(windowsSelection ? .control : .command)
@@ -67,13 +65,18 @@ final class ExplorerFileTable: NSTableView {
         }
         let initial = additive ? selectedRowIndexes : IndexSet()
         if !additive { deselectAll(nil) }
-        guard let window else { return }
+        guard let window, let viewport = enclosingScrollView?.contentView else { return }
+        let overlay = ExplorerSelectionOverlay(frame: viewport.bounds)
+        // A sibling above the document keeps the band above reused row views.
+        viewport.addSubview(overlay, positioned: .above, relativeTo: self)
+        defer { overlay.removeFromSuperview() }
         while let drag = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
             if drag.type == .leftMouseUp { break }
             autoscroll(with: drag)
             let p = convert(drag.locationInWindow, from: nil)
             let box = NSRect(x: min(origin.x, p.x), y: min(origin.y, p.y), width: abs(p.x-origin.x), height: abs(p.y-origin.y))
-            rubberBand = box
+            overlay.frame = viewport.bounds
+            overlay.selectionRect = overlay.convert(box, from: self)
             let intersected = rows(in: box)
             var selected = initial
             if intersected.location != NSNotFound && intersected.length > 0 {
@@ -81,9 +84,7 @@ final class ExplorerFileTable: NSTableView {
                 if intersected.location < end { selected.formUnion(IndexSet(integersIn: intersected.location..<end)) }
             }
             selectRowIndexes(selected, byExtendingSelection: false)
-            needsDisplay = true
         }
-        rubberBand = nil; needsDisplay = true
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -93,11 +94,4 @@ final class ExplorerFileTable: NSTableView {
         return contextMenu?()
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        if let rubberBand {
-            ExplorerStyle.accent.withAlphaComponent(0.12).setFill(); rubberBand.fill()
-            ExplorerStyle.accent.withAlphaComponent(0.6).setStroke(); NSBezierPath(rect: rubberBand).stroke()
-        }
-    }
 }

@@ -93,8 +93,11 @@ struct UIComponentRunner {
         verifyColumnOverflowAndRenameVisibility()
         verifyWindowButtons()
         verifyMouseNavigation()
+        verifyControlClickSelection()
+        verifyRubberBandSelection()
         verifyTabStripLayout()
         verifyBreadcrumbInteraction()
+        verifyRowHover()
     }
 
     @MainActor
@@ -225,6 +228,21 @@ struct UIComponentRunner {
             precondition(scroll.documentVisibleRect.maxX >= scroll.documentView!.bounds.maxX - 1, "The final segment must remain visible")
         }
         print("PASS: breadcrumb navigation/editing, input centering, outside clicks across all buttons/regions, window blur, draft cancellation and target action")
+    }
+
+    @MainActor
+    static func verifyRowHover() {
+        let row = ExplorerRowView(frame: NSRect(x: 0, y: 0, width: 500, height: 36))
+        let event = NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
+                                          windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)!
+        row.mouseEntered(with: event)
+        precondition(row.hovered && !row.isSelected)
+        row.isSelected = true
+        row.mouseExited(with: event)
+        precondition(!row.hovered && row.isSelected, "Hover exit must preserve selection")
+        row.updateTrackingAreas()
+        precondition(!row.hovered, "Detached/reused rows must not retain stale hover")
+        print("PASS: list row hover enter/exit, selection independence and tracking reset")
     }
 
     @MainActor
@@ -419,6 +437,131 @@ struct UIComponentRunner {
         send(.otherMouseDown, button: 4)
         precondition(commands.count == 3, "Forward must do nothing at the end of history")
         print("PASS: mouse side buttons navigate once per click, respect history availability, and ignore other buttons")
+    }
+
+    @MainActor
+    static func verifyRubberBandSelection() {
+        var inspectSelection: (() -> Void)?
+        let controller = ExplorerWindowController { action in
+            if case .select = action { inspectSelection?() }
+        }
+        let window = controller.window!
+        let table = controller.fileTable
+        let viewport = table.enclosingScrollView!.contentView
+        var snapshot = ExplorerSnapshot()
+        snapshot.entries = (0..<8).map {
+            FileEntry(url: URL(fileURLWithPath: "/tmp/band-\($0).txt"), name: "band-\($0).txt", isDirectory: false)
+        }
+        window.contentView!.layoutSubtreeIfNeeded()
+        controller.render(snapshot)
+        controller.showWindow(nil)
+        defer { window.orderOut(nil) }
+
+        for offset: CGFloat in [0, 48] {
+            table.setFrameSize(NSSize(width: table.frame.width, height: viewport.bounds.height + 100))
+            viewport.scroll(to: NSPoint(x: 0, y: offset))
+            let origin = NSPoint(x: 360, y: 400)
+            let end = NSPoint(x: 130, y: 80)
+            var inspected = false
+            inspectSelection = {
+                guard !table.selectedRowIndexes.isEmpty else { return }
+                guard let overlay = viewport.subviews.compactMap({ $0 as? ExplorerSelectionOverlay }).first else {
+                    fatalError("Dragging must show a selection overlay")
+                }
+                precondition(overlay.hitTest(.zero) == nil, "The selection overlay must pass mouse events through")
+                precondition(table.selectedRowIndexes == IndexSet(2..<8), "Upward blank-space drag must select intersected rows")
+                window.contentView!.layoutSubtreeIfNeeded()
+                let bitmap = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds)!
+                viewport.cacheDisplay(in: viewport.bounds, to: bitmap)
+                @MainActor func color(at point: NSPoint) -> NSColor {
+                    let local = viewport.convert(point, from: table)
+                    let x = Int((local.x - viewport.bounds.minX) * CGFloat(bitmap.pixelsWide) / viewport.bounds.width)
+                    let y = Int((local.y - viewport.bounds.minY) * CGFloat(bitmap.pixelsHigh) / viewport.bounds.height)
+                    return bitmap.colorAt(x: x, y: y)!.usingColorSpace(.deviceRGB)!
+                }
+                // Verify actual compositing over both an opaque selected row and empty space.
+                for y: CGFloat in [120, 330] {
+                    let outside = color(at: NSPoint(x: end.x - 4, y: y))
+                    let border = color(at: NSPoint(x: end.x, y: y))
+                    precondition(outside.redComponent - border.redComponent > 0.1,
+                                 "The rectangle border must remain visible over rows and blank space")
+                }
+                if offset == 0, let path = ProcessInfo.processInfo.environment["WINWAY_SELECTION_SNAPSHOT"] {
+                    try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+                }
+                inspected = true
+            }
+            func event(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent {
+                NSEvent.mouseEvent(with: type, location: table.convert(point, to: nil), modifierFlags: [],
+                                  timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                  context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            }
+            // Queue the tracked events before entering the table's native drag loop.
+            NSApp.postEvent(event(.leftMouseUp, at: end), atStart: true)
+            NSApp.postEvent(event(.leftMouseDragged, at: end), atStart: true)
+            table.mouseDown(with: event(.leftMouseDown, at: origin))
+            precondition(inspected, "The drag must update selection before mouse-up")
+            precondition(!viewport.subviews.contains { $0 is ExplorerSelectionOverlay }, "Mouse-up must remove the rectangle")
+            inspectSelection = nil
+            table.deselectAll(nil)
+        }
+        print("PASS: upward rubber-band selection, border pixels over selected rows and empty space, scroll coordinates, event passthrough and mouse-up cleanup")
+    }
+
+    @MainActor
+    static func verifyControlClickSelection() {
+        var selections: [Set<URL>] = []
+        let controller = ExplorerWindowController { action in
+            if case .select(let urls) = action { selections.append(urls) }
+        }
+        let window = controller.window!
+        let table = controller.fileTable
+        var snapshot = ExplorerSnapshot()
+        snapshot.preset = .windows
+        snapshot.entries = (0..<5).map {
+            FileEntry(url: URL(fileURLWithPath: "/tmp/selection-\($0).txt"), name: "selection-\($0).txt", isDirectory: false)
+        }
+        window.contentView!.layoutSubtreeIfNeeded()
+        controller.render(snapshot)
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        var menus = 0
+        table.contextMenu = {
+            menus += 1
+            let menu = NSMenu()
+            // This routing probe must not enter a native Services popup loop.
+            menu.allowsContextMenuPlugIns = false
+            return menu
+        }
+        func click(_ row: Int, modifiers: NSEvent.ModifierFlags = [], type: NSEvent.EventType = .leftMouseDown) {
+            let rect = table.rect(ofRow: row)
+            let point = table.convert(NSPoint(x: 70, y: rect.midY), to: nil)
+            let upType: NSEvent.EventType = type == .rightMouseDown ? .rightMouseUp : .leftMouseUp
+            for eventType in [type, upType] {
+                let event = NSEvent.mouseEvent(with: eventType, location: point, modifierFlags: modifiers,
+                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                              context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+                window.sendEvent(event)
+            }
+        }
+        click(0)
+        click(2, modifiers: .control)
+        precondition(table.selectedRowIndexes == IndexSet([0, 2]), "Ctrl-click must add a nonadjacent file")
+        click(0, modifiers: .control)
+        precondition(table.selectedRowIndexes == IndexSet([2]), "Ctrl-click must deselect an already selected file")
+        click(4, modifiers: [.control, .shift])
+        precondition(table.selectedRowIndexes == IndexSet(0...4), "Ctrl-Shift-click must extend from the selection anchor")
+        precondition(menus == 0, "Windows Ctrl-click must not open a context menu")
+        precondition(selections.last == Set(snapshot.entries.map(\.url)), "Selection must reach the application model")
+        click(1)
+        precondition(table.selectedRowIndexes == IndexSet([1]), "Plain click must replace the selection")
+        click(1, type: .rightMouseDown)
+        precondition(menus == 1, "Right-click must still open a context menu")
+        table.windowsSelection = false
+        click(3, modifiers: .command)
+        precondition(table.selectedRowIndexes == IndexSet([1, 3]), "macOS Command-click must preserve additive selection")
+        print("PASS: window-dispatched Ctrl-click add/remove, Ctrl-Shift range, plain click, model selection, right-click and macOS Command-click")
     }
 
     @MainActor

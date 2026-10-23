@@ -145,7 +145,28 @@ final class ExplorerButton: NSButton {
 }
 
 final class ExplorerRowView: NSTableRowView {
+    private var hoverTracking: NSTrackingArea?
+    private(set) var hovered = false { didSet { if oldValue != hovered { needsDisplay = true } } }
     override var isEmphasized: Bool { get { false } set {} }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverTracking = area
+        if let window {
+            hovered = window.isKeyWindow && visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        } else { hovered = false }
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true }
+    override func mouseExited(with event: NSEvent) { hovered = false }
+    override func drawBackground(in dirtyRect: NSRect) {
+        super.drawBackground(in: dirtyRect)
+        if hovered && !isSelected {
+            ExplorerStyle.chrome.setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
+        }
+    }
     override func drawSelection(in dirtyRect: NSRect) {
         ExplorerStyle.selected.setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 0, dy: 0), xRadius: 4, yRadius: 4).fill()
