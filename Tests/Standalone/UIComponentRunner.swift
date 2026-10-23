@@ -93,6 +93,44 @@ struct UIComponentRunner {
         verifyColumnOverflowAndRenameVisibility()
         verifyWindowButtons()
         verifyMouseNavigation()
+        verifyTabStripLayout()
+    }
+
+    @MainActor
+    static func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+
+    @MainActor
+    static func verifyTabStripLayout() {
+        let controller = ExplorerWindowController { _ in }
+        let window = controller.window!
+        var snapshot = ExplorerSnapshot()
+        snapshot.tabs = (0..<12).map { ExplorerTab(id: UUID(), title: "Tab \($0)") }
+        snapshot.activeTabID = snapshot.tabs[11].id
+        for width: CGFloat in [960, 1376, 1600] {
+            window.setContentSize(NSSize(width: width, height: 820))
+            window.contentView!.layoutSubtreeIfNeeded()
+            controller.render(snapshot)
+            let views = descendants(window.contentView!)
+            let strip = views.compactMap { $0 as? ExplorerTabStrip }.first!
+            let scroll = strip.enclosingScrollView!
+            let plus = views.compactMap { $0 as? ExplorerButton }.first { $0.glyph == "plus" }!
+            precondition(plus.superview === scroll.superview, "Plus must sit outside the scrolling document")
+            precondition(abs(plus.frame.maxX - (width - 16)) < 0.5, "Overflow pins plus to the right")
+            let plusFrame = plus.frame
+            scroll.contentView.scroll(to: NSPoint(x: 400, y: 0))
+            precondition(plus.frame == plusFrame, "Scrolling tabs must not move plus")
+            let tabs = strip.subviews.compactMap { $0 as? ExplorerTabView }
+            precondition(strip.orderedTabIDs == snapshot.tabs.map(\.id))
+            // Clicking the title reaches the gesture view; close remains a button.
+            let first = tabs[0]
+            precondition(first.hitTest(NSPoint(x: 50, y: 16)) === first)
+            precondition(first.hitTest(NSPoint(x: 200, y: 16)) is ExplorerButton)
+        }
+        snapshot.tabs = Array(snapshot.tabs.prefix(1)); snapshot.activeTabID = snapshot.tabs[0].id
+        controller.render(snapshot)
+        let strip = descendants(window.contentView!).compactMap { $0 as? ExplorerTabStrip }.first!
+        precondition(strip.enclosingScrollView!.contentView.bounds.minX == 0, "Closing overflow tabs must clamp the scroll position")
+        print("PASS: tab overflow/resize, fixed plus, visual order, gesture hit regions and scroll clamping")
     }
 
     @MainActor

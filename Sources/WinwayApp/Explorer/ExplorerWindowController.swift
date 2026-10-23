@@ -21,7 +21,8 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
     private let detailsScroll = NSScrollView()
     private let detailBody = ExplorerSurface()
     private let tabsScroll = NSScrollView()
-    private let tabsBody = ExplorerSurface(color: ExplorerStyle.titlebar)
+    private let tabsBody = ExplorerTabStrip()
+    private var newTabButton: ExplorerButton!
     private let breadcrumb = NSPathControl()
     private let pathField = NSTextField()
     private let searchField = NSTextField()
@@ -97,7 +98,12 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
             scroll.contentInsets = NSEdgeInsetsZero
         }
         tabsScroll.drawsBackground = false; tabsScroll.hasHorizontalScroller = false; tabsScroll.hasVerticalScroller = false
+        tabsScroll.verticalScrollElasticity = .none
+        tabsScroll.horizontalScrollElasticity = .automatic
         tabsScroll.documentView = tabsBody; tabBar.addSubview(tabsScroll)
+        tabsBody.onMove = { [weak self] id, next in self?.onAction(.moveTab(id, before: next)) }
+        newTabButton = ExplorerButton(icon: "plus", tooltip: "新建标签页", action: { [weak self] in self?.emit(.newTab) })
+        tabBar.addSubview(newTabButton)
         buildNavigation(); buildCommandBar(); buildTable(); buildSidebar()
         content.addSubview(sidebar); content.addSubview(fileScroll); content.addSubview(details)
         detailsScroll.documentView = detailBody; detailsScroll.drawsBackground = false; detailsScroll.hasVerticalScroller = true
@@ -345,9 +351,12 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
     @objc private func resized() { root.layoutSubtreeIfNeeded(); layoutContent() }
     private func layoutContent() {
         let w = root.bounds.width
-        tabsScroll.frame = NSRect(x: 116,y: 6,width: max(100,w-132),height: 32)
-        tabsBody.frame.size = NSSize(width: max(tabsScroll.bounds.width,CGFloat(snapshot.tabs.count)*228+40),height: 32)
-        for (index, view) in tabButtons.enumerated() { view.frame = NSRect(x: CGFloat(index)*228,y: 0,width: index < snapshot.tabs.count ? 220 : 32,height: 32) }
+        let tabsWidth = max(0, CGFloat(snapshot.tabs.count) * 228 - 8)
+        let viewportWidth = min(tabsWidth, max(100, w - 168))
+        tabsScroll.frame = NSRect(x: 116,y: 6,width: viewportWidth,height: 32)
+        tabsBody.frame.size = NSSize(width: max(viewportWidth, tabsWidth),height: 32)
+        newTabButton.frame = NSRect(x: tabsScroll.frame.maxX + 4,y: 6,width: 32,height: 32)
+        tabsBody.layoutTabs()
         for (i, command) in [CommandID.back,.forward,.up].enumerated() { buttons[command]?.frame = NSRect(x: 16+CGFloat(i)*40,y: 6,width: 32,height: 32) }
         let searchWidth: CGFloat = w < 1100 ? 250 : 320
         breadcrumb.frame = NSRect(x: 136,y: 6,width: w-136-searchWidth-24,height: 32)
@@ -387,7 +396,7 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         statusRootButton.frame = NSRect(x: w-40,y: 2,width: 28,height: 28)
         layoutWindowButtons()
         let tabOrigin = tabsScroll.contentView.bounds.origin
-        tabsScroll.contentView.scroll(to: NSPoint(x: tabOrigin.x, y: 0))
+        tabsScroll.contentView.scroll(to: NSPoint(x: min(tabOrigin.x, max(0, tabsWidth - viewportWidth)), y: 0))
         positionRenameEditor()
     }
 
@@ -417,6 +426,7 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
     private func updateTabs() {
         let key = snapshot.tabs.map { "\($0.id):\($0.title)" }.joined() + snapshot.activeTabID.uuidString
         guard key != tabLayoutKey else { return }; tabLayoutKey = key
+        tabsBody.cancelReordering(animated: false)
         tabButtons.forEach { $0.removeFromSuperview() }; tabButtons.removeAll()
         for (index, tab) in snapshot.tabs.enumerated() {
             let view = ExplorerTabView(tab: tab, isSelected: tab.id == snapshot.activeTabID,
@@ -424,8 +434,6 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
                                        onAction: { [weak self] in self?.onAction($0) })
             tabsBody.addSubview(view); tabButtons.append(view)
         }
-        let new = ExplorerButton(icon: "plus",tooltip: "新建标签页",action: { [weak self] in self?.emit(.newTab) })
-        tabsBody.addSubview(new); tabButtons.append(new)
     }
 
     private func updateLocations() {

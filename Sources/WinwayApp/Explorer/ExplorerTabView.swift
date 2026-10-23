@@ -1,11 +1,16 @@
 import AppKit
 
-final class ExplorerTabView: ExplorerSurface {
-    private let tabID: UUID
+final class ExplorerTabView: ExplorerSurface, NSDraggingSource {
+    static let pasteboardType = NSPasteboard.PasteboardType("com.winway.tab")
+    let tabID: UUID
+    private(set) var dragAnchorX: CGFloat = 110
     private let isSelected: Bool
     private let onAction: (ExplorerAction) -> Void
     private var hoverTracking: NSTrackingArea?
     private var hovered = false { didSet { updateBackground() } }
+    private var pressed = false { didSet { updateBackground() } }
+    private var pressOrigin: NSPoint?
+    private weak var activateButton: ExplorerButton?
 
     init(tab: ExplorerTab, isSelected: Bool, index: Int, count: Int,
          onAction: @escaping (ExplorerAction) -> Void) {
@@ -20,6 +25,7 @@ final class ExplorerTabView: ExplorerSurface {
             onAction(.activateTab(tab.id))
         }
         activate.showsInteractionBackground = false
+        activateButton = activate
         activate.frame = NSRect(x: 4, y: 0, width: 184, height: 32)
         activate.font = .systemFont(ofSize: 13, weight: isSelected ? .medium : .regular)
         activate.setAccessibilityValue(isSelected ? "已选中" : "未选中")
@@ -27,6 +33,7 @@ final class ExplorerTabView: ExplorerSurface {
             onAction(.closeTab(tab.id))
         }
         close.iconSize = 14
+        close.showsInteractionBackground = false
         close.frame = NSRect(x: 188, y: 2, width: 28, height: 28)
         addSubview(activate)
         addSubview(close)
@@ -55,8 +62,52 @@ final class ExplorerTabView: ExplorerSurface {
 
     override var mouseDownCanMoveWindow: Bool { false }
 
+    // Keep the title button's accessibility action, but route pointer gestures
+    // to the tab so a press can become a drag without activating it first.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === activateButton ? self : hit
+    }
+
     override func mouseDown(with event: NSEvent) {
-        onAction(.activateTab(tabID))
+        pressOrigin = convert(event.locationInWindow, from: nil)
+        pressed = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let origin = pressOrigin else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard hypot(point.x - origin.x, point.y - origin.y) >= 5 else { return }
+        dragAnchorX = origin.x
+        pressOrigin = nil
+        pressed = false
+        let item = NSPasteboardItem()
+        item.setString(tabID.uuidString, forType: Self.pasteboardType)
+        let drag = NSDraggingItem(pasteboardWriter: item)
+        let image = NSImage(size: bounds.size)
+        if let bitmap = bitmapImageRepForCachingDisplay(in: bounds) {
+            cacheDisplay(in: bounds, to: bitmap)
+            image.addRepresentation(bitmap)
+        }
+        drag.setDraggingFrame(bounds, contents: image)
+        beginDraggingSession(with: [drag], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let shouldActivate = pressOrigin != nil && bounds.contains(convert(event.locationInWindow, from: nil))
+        pressOrigin = nil
+        pressed = false
+        if shouldActivate { onAction(.activateTab(tabID)) }
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .withinApplication ? .move : []
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        pressOrigin = nil
+        pressed = false
+        (superview as? ExplorerTabStrip)?.cancelReordering()
     }
 
     @objc private func closeFromMenu(_ sender: NSMenuItem) {
@@ -82,7 +133,7 @@ final class ExplorerTabView: ExplorerSurface {
 
     private func updateBackground() {
         let base: NSColor = isSelected ? .white : ExplorerStyle.chrome
-        let color = hovered ? base.blended(withFraction: isSelected ? 0.3 : 0.55, of: ExplorerStyle.border) ?? base : base
+        let color = pressed ? ExplorerStyle.selected : (hovered ? base.blended(withFraction: isSelected ? 0.3 : 0.55, of: ExplorerStyle.border) ?? base : base)
         layer?.backgroundColor = color.cgColor
     }
 }

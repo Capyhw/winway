@@ -146,6 +146,13 @@ final class AppModel {
         case .activateTab(let id):
             guard tabs.contains(where: { $0.id == id }) else { return }
             activeID = id; updatePreview()
+        case .moveTab(let id, let nextID):
+            guard id != nextID, let source = tabs.firstIndex(where: { $0.id == id }),
+                  nextID == nil || tabs.contains(where: { $0.id == nextID }) else { return }
+            let tab = tabs.remove(at: source)
+            let destination = nextID.flatMap { next in tabs.firstIndex { $0.id == next } } ?? tabs.endIndex
+            tabs.insert(tab, at: destination)
+            render()
         case .closeTab(let id): closeTab(id)
         case .closeTabs(let id, let scope): closeTabs(id, scope: scope)
         case .filter(let text): setSearch(text)

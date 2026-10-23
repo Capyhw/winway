@@ -65,6 +65,7 @@ enum ExplorerAction {
     case navigate(URL)
     case navigatePath(String)
     case activateTab(UUID)
+    case moveTab(UUID, before: UUID?)
     case closeTab(UUID)
     case closeTabs(UUID, TabCloseScope)
     case filter(String)
