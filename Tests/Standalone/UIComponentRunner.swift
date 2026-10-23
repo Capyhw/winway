@@ -94,6 +94,7 @@ struct UIComponentRunner {
         verifyWindowButtons()
         verifyMouseNavigation()
         verifyTabStripLayout()
+        verifyBreadcrumbInteraction()
     }
 
     @MainActor
@@ -131,6 +132,99 @@ struct UIComponentRunner {
         let strip = descendants(window.contentView!).compactMap { $0 as? ExplorerTabStrip }.first!
         precondition(strip.enclosingScrollView!.contentView.bounds.minX == 0, "Closing overflow tabs must clamp the scroll position")
         print("PASS: tab overflow/resize, fixed plus, visual order, gesture hit regions and scroll clamping")
+    }
+
+    @MainActor
+    static func verifyBreadcrumbInteraction() {
+        var actions: [ExplorerAction] = []
+        let controller = ExplorerWindowController { actions.append($0) }
+        let window = controller.window!
+        var snapshot = ExplorerSnapshot()
+        snapshot.directory = URL(fileURLWithPath: "/Users/example/中文 空格/Project #1")
+        snapshot.enabledCommands = [.newTab]
+        window.contentView!.layoutSubtreeIfNeeded()
+        controller.render(snapshot)
+        let views = descendants(window.contentView!)
+        let breadcrumb = views.compactMap { $0 as? ExplorerBreadcrumbView }.first!
+        let field = views.compactMap { $0 as? NSTextField }.first { $0.accessibilityIdentifier() == "winway.path-editor" }!
+        let segments = descendants(breadcrumb).compactMap { $0 as? ExplorerButton }.filter { $0.accessibilityIdentifier() == "winway.path-segment" }
+        precondition(segments.map(\.title) == ["/", "Users", "example", "中文 空格", "Project #1"])
+        for button in segments {
+            actions.removeAll()
+            button.performClick(nil)
+            precondition(field.isHidden && !breadcrumb.isHidden, "A segment click must never edit the path")
+            guard actions.count == 1, case .navigate(let url) = actions[0] else { fatalError("Segment must emit one navigation") }
+            precondition(url.path == button.toolTip, "Segments must retain their exact ancestor URLs")
+        }
+        let edit = descendants(breadcrumb).compactMap { $0 as? ExplorerButton }.first { $0.accessibilityIdentifier() == "winway.path-edit-area" }!
+        precondition(edit.frame.width >= 40 && edit.frame.maxX <= breadcrumb.bounds.width)
+        actions.removeAll()
+        edit.performClick(nil)
+        precondition(actions.isEmpty && !field.isHidden && breadcrumb.isHidden)
+        guard let text = field.currentEditor() as? NSTextView else { fatalError("Blank area must focus the address editor") }
+        precondition(text.isEditable, "The native field editor must accept typing and paste")
+        precondition(text.string == snapshot.directory.path && text.selectedRange.length == (text.string as NSString).length)
+        text.insertText("/tmp", replacementRange: text.selectedRange)
+        precondition(text.string == "/tmp", "Address input must replace the selected path")
+        controller.focusAddress()
+        precondition(!field.isHidden && text.string == "/tmp" && text.selectedRange.length == 4,
+                     "Focusing an already editing address must select its input without closing or resetting it")
+        let editorRect = text.convert(text.bounds, to: field.superview!)
+        precondition(abs(editorRect.midY - field.superview!.bounds.midY) <= 1, "The live address editor must be vertically centered")
+        _ = controller.control(field, textView: text, doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+        precondition(field.isHidden && !breadcrumb.isHidden && actions.isEmpty, "Escape must restore breadcrumbs without navigation")
+        controller.focusAddress()
+        controller.focusFiles()
+        precondition(field.isHidden && !breadcrumb.isHidden, "Losing focus must restore breadcrumbs")
+        let explorerWindow = window as! ExplorerWindow
+        func pointerDown(at point: NSPoint, type: NSEvent.EventType = .leftMouseDown) {
+            let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
+                                          windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            explorerWindow.onMouseDown?(event)
+        }
+        // Input and its padding remain editable; every outside region dismisses
+        // without submitting the draft or consuming the target's original action.
+        controller.focusAddress()
+        let addressSurface = field.superview!
+        pointerDown(at: addressSurface.convert(NSPoint(x: 2, y: 16), to: nil))
+        precondition(!field.isHidden && field.currentEditor() != nil, "Address padding must not dismiss editing")
+        pointerDown(at: field.convert(NSPoint(x: 20, y: 9), to: nil), type: .rightMouseDown)
+        precondition(!field.isHidden, "The editor's context menu must remain usable")
+        let actionCount = actions.count
+        let root = window.contentView!
+        for point in [NSPoint(x: 900, y: 22), NSPoint(x: 900, y: 110), NSPoint(x: 900, y: 790)] {
+            for type: NSEvent.EventType in [.leftMouseDown, .rightMouseDown, .otherMouseDown] {
+                controller.focusAddress()
+                let editor = field.currentEditor() as! NSTextView
+                editor.insertText("/unsubmitted", replacementRange: editor.selectedRange)
+                pointerDown(at: root.convert(point, to: nil), type: type)
+                precondition(field.isHidden && !breadcrumb.isHidden && field.currentEditor() == nil)
+                precondition(actions.count == actionCount && field.stringValue == snapshot.directory.path,
+                             "Outside clicks must discard the draft without navigating")
+            }
+        }
+        controller.focusAddress()
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        precondition(field.isHidden && !breadcrumb.isHidden, "Clicking another window or app must also exit editing")
+        let plus = descendants(root).compactMap { $0 as? ExplorerButton }.first { $0.glyph == "plus" }!
+        controller.focusAddress()
+        pointerDown(at: plus.convert(NSPoint(x: 16, y: 16), to: nil))
+        plus.performClick(nil)
+        guard case .command(.newTab) = actions.last else { fatalError("The outside click's original button action must remain available") }
+        controller.focusAddress()
+        field.stringValue = "/tmp"
+        field.sendAction(field.action, to: field.target)
+        precondition(field.isHidden && !breadcrumb.isHidden)
+        guard case .navigatePath("/tmp") = actions.last else { fatalError("Enter must submit the edited path") }
+        for path in ["/", "/Users/example/" + Array(repeating: "long folder 中文", count: 20).joined(separator: "/")] {
+            snapshot.directory = URL(fileURLWithPath: path)
+            controller.render(snapshot)
+            breadcrumb.layoutSubtreeIfNeeded()
+            precondition(edit.frame.width >= 40 && edit.frame.maxX <= breadcrumb.bounds.width)
+            let scroll = descendants(breadcrumb).compactMap { $0 as? NSScrollView }.first!
+            precondition(scroll.documentVisibleRect.maxX >= scroll.documentView!.bounds.maxX - 1, "The final segment must remain visible")
+        }
+        print("PASS: breadcrumb navigation/editing, input centering, outside clicks across all buttons/regions, window blur, draft cancellation and target action")
     }
 
     @MainActor

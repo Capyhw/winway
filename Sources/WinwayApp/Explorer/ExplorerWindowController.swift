@@ -23,7 +23,8 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
     private let tabsScroll = NSScrollView()
     private let tabsBody = ExplorerTabStrip()
     private var newTabButton: ExplorerButton!
-    private let breadcrumb = NSPathControl()
+    private let breadcrumb = ExplorerBreadcrumbView()
+    private let pathEditorSurface = ExplorerSurface()
     private let pathField = NSTextField()
     private let searchField = NSTextField()
     private let searchSurface = ExplorerSurface()
@@ -60,15 +61,22 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         window.contentMinSize = NSSize(width: 960, height: 600)
         window.backgroundColor = .white; window.appearance = NSAppearance(named: .aqua)
         super.init(window: window)
+        window.onMouseDown = { [weak self] event in
+            guard let self, !self.pathEditorSurface.isHidden else { return }
+            let point = self.pathEditorSurface.convert(event.locationInWindow, from: nil)
+            if !self.pathEditorSurface.bounds.contains(point) { self.dismissAddressEditing() }
+        }
         window.onMouseNavigation = { [weak self] command in
             guard let self, self.snapshot.enabledCommands.contains(command) else { return }
             self.emit(command)
         }
         window.contentView = root
         assemble()
+        window.initialFirstResponder = fileTable
         window.center()
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: fileScroll.contentView)
         NotificationCenter.default.addObserver(self, selector: #selector(resized), name: NSWindow.didResizeNotification, object: window)
+        NotificationCenter.default.addObserver(self, selector: #selector(dismissAddressEditing), name: NSWindow.didResignKeyNotification, object: window)
         NotificationCenter.default.addObserver(self, selector: #selector(layoutWindowButtons), name: NSWindow.didUpdateNotification, object: window)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -126,16 +134,22 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         for command in [CommandID.back, .forward, .up] {
             let b = makeButton(command, icon: command.rawValue); navigation.addSubview(b)
         }
-        breadcrumb.pathStyle = .standard; breadcrumb.isEditable = false; breadcrumb.focusRingType = .none
-        breadcrumb.target = self; breadcrumb.action = #selector(pathClicked); breadcrumb.doubleAction = #selector(editPath)
-        breadcrumb.font = .systemFont(ofSize: 13); breadcrumb.backgroundColor = .white
-        breadcrumb.wantsLayer = true; breadcrumb.layer?.cornerRadius = 4; breadcrumb.layer?.borderWidth = 1; breadcrumb.layer?.borderColor = ExplorerStyle.border.cgColor
-        breadcrumb.setAccessibilityLabel("当前位置，双击编辑路径")
+        breadcrumb.onNavigate = { [weak self] url in self?.onAction(.navigate(url)) }
+        breadcrumb.onEdit = { [weak self] in self?.focusAddress() }
         navigation.addSubview(breadcrumb)
+        pathField.isEditable = true; pathField.isSelectable = true
+        pathField.isBezeled = false; pathField.isBordered = false
+        pathField.drawsBackground = false
+        pathField.cell?.usesSingleLineMode = true; pathField.cell?.isScrollable = true
+        pathEditorSurface.layer?.cornerRadius = 4; pathEditorSurface.layer?.borderWidth = 1
+        pathEditorSurface.layer?.borderColor = ExplorerStyle.accent.cgColor
+        pathEditorSurface.isHidden = true
+        pathField.setAccessibilityIdentifier("winway.path-editor")
         pathField.isHidden = true; pathField.font = .systemFont(ofSize: 13); pathField.delegate = self
         pathField.target = self; pathField.action = #selector(submitPath); pathField.focusRingType = .none
         pathField.placeholderString = "输入绝对路径或 ~/ 路径"; pathField.setAccessibilityLabel("目录路径")
-        navigation.addSubview(pathField)
+        pathEditorSurface.addSubview(pathField)
+        navigation.addSubview(pathEditorSurface)
         searchField.isBezeled = false; searchField.isBordered = false; searchField.drawsBackground = false
         searchField.font = .systemFont(ofSize: 13); searchField.placeholderString = "搜索当前目录及子文件夹"
         searchField.focusRingType = .none; searchField.cell?.usesSingleLineMode = true
@@ -223,9 +237,12 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
             finishRename(commit: false, restoreFocus: false)
         }
         snapshot = new
+        if (tabChanged || directoryChanged) && !pathField.isHidden {
+            window?.makeFirstResponder(fileTable)
+            setAddressEditing(false)
+        }
         window?.title = "\(new.directory.lastPathComponent) — Winway"
-        breadcrumb.url = new.directory
-        for (index, item) in breadcrumb.pathItems.enumerated() { item.image = index == 0 ? ExplorerStyle.image("pc",size: 18) : nil }
+        breadcrumb.setDirectory(new.directory)
         if pathField.currentEditor() == nil { pathField.stringValue = new.directory.path }
         if searchField.stringValue != new.filter { searchField.stringValue = new.filter }
         clearSearchButton.isHidden = new.filter.isEmpty
@@ -272,7 +289,30 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         }
     }
 
-    func focusAddress() { pathField.isHidden = false; breadcrumb.isHidden = true; pathField.stringValue = snapshot.directory.path; window?.makeFirstResponder(pathField); pathField.selectText(nil) }
+    func focusAddress() {
+        if let editor = pathField.currentEditor() as? NSTextView, !pathField.isHidden {
+            editor.selectAll(nil)
+            return
+        }
+        setAddressEditing(true)
+        pathField.stringValue = snapshot.directory.path
+        pathField.selectText(nil)
+        if let editor = pathField.currentEditor() as? NSTextView {
+            editor.isEditable = true; editor.isSelectable = true
+            editor.setSelectedRange(NSRange(location: 0, length: (editor.string as NSString).length))
+        }
+    }
+    private func setAddressEditing(_ editing: Bool) {
+        pathEditorSurface.isHidden = !editing
+        pathField.isHidden = !editing
+        breadcrumb.isHidden = editing
+    }
+    @objc private func dismissAddressEditing() {
+        guard !pathEditorSurface.isHidden else { return }
+        window?.makeFirstResponder(fileTable)
+        setAddressEditing(false)
+        pathField.stringValue = snapshot.directory.path
+    }
     func focusSearch() { window?.makeFirstResponder(searchField); searchField.selectText(nil) }
     private func clearSearch() {
         searchField.stringValue = ""; clearSearchButton.isHidden = true
@@ -360,7 +400,10 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         for (i, command) in [CommandID.back,.forward,.up].enumerated() { buttons[command]?.frame = NSRect(x: 16+CGFloat(i)*40,y: 6,width: 32,height: 32) }
         let searchWidth: CGFloat = w < 1100 ? 250 : 320
         breadcrumb.frame = NSRect(x: 136,y: 6,width: w-136-searchWidth-24,height: 32)
-        pathField.frame = breadcrumb.frame; searchSurface.frame = NSRect(x: w-searchWidth-16,y: 6,width: searchWidth,height: 32)
+        pathEditorSurface.frame = breadcrumb.frame
+        pathField.frame = pathEditorSurface.bounds.insetBy(dx: 8, dy: 7)
+        searchSurface.frame = NSRect(x: w-searchWidth-16,y: 6,width: searchWidth,height: 32)
+        breadcrumb.layoutSubtreeIfNeeded()
         searchIcon.frame = NSRect(x: 8, y: 7, width: 18, height: 18)
         searchField.frame = NSRect(x: 32, y: 7, width: searchWidth - 64, height: 18)
         clearSearchButton.frame = NSRect(x: searchWidth - 30, y: 2, width: 28, height: 28)
@@ -483,9 +526,7 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         if key == "ascending" || key == "descending" { onAction(.sort(snapshot.sortKey,key == "ascending")) }
         else { onAction(.sort(key,true)) }
     }
-    @objc private func pathClicked() { if let url = breadcrumb.clickedPathItem?.url { onAction(.navigate(url)) } }
-    @objc private func editPath() { focusAddress() }
-    @objc private func submitPath() { let path = pathField.stringValue; pathField.isHidden = true; breadcrumb.isHidden = false; focusFiles(); onAction(.navigatePath(path)) }
+    @objc private func submitPath() { let path = pathField.stringValue; setAddressEditing(false); focusFiles(); onAction(.navigatePath(path)) }
     @objc private func locationClicked() { let row = outline.clickedRow; guard row >= 0,row < locationItems.count else { return }; onAction(.navigate(locationItems[row].location.url)) }
     @objc private func scrolled() { positionRenameEditor(); if !rendering { onAction(.scroll(max(0,fileScroll.contentView.bounds.origin.y + fileScroll.contentView.contentInsets.top))) } }
 
@@ -553,6 +594,9 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
     }
     func controlTextDidEndEditing(_ obj: Notification) {
         if let field = obj.object as? NSTextField, field === renameEditor { finishRename(commit: true, restoreFocus: false) }
+        if (obj.object as? NSTextField) === pathField {
+            setAddressEditing(false)
+        }
     }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if control === searchField, commandSelector == #selector(NSResponder.cancelOperation(_:)) {
@@ -563,7 +607,7 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
             if commandSelector == #selector(NSResponder.insertNewline(_:)) { finishRename(commit: true); return true }
         }
         if commandSelector == #selector(NSResponder.cancelOperation(_:)), control === pathField {
-            pathField.isHidden = true; breadcrumb.isHidden = false; focusFiles(); return true
+            setAddressEditing(false); focusFiles(); return true
         }
         return false
     }
