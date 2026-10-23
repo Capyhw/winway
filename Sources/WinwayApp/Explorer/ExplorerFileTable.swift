@@ -30,7 +30,10 @@ final class ExplorerRenameOverlay: NSView {
 }
 
 /// AppKit provides row reuse; selection is over row indexes, including offscreen rows.
-final class ExplorerFileTable: NSTableView {
+final class ExplorerFileTable: NSTableView, @MainActor NSServicesMenuRequestor {
+    // Some existing file services still request a single legacy path array.
+    static let filenamesType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+    static let serviceTypes: [NSPasteboard.PasteboardType] = [.fileURL, filenamesType]
     var windowsSelection = true
     var openSelection: (() -> Void)?
     var contextMenu: (() -> NSMenu)?
@@ -44,6 +47,7 @@ final class ExplorerFileTable: NSTableView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         let origin = convert(event.locationInWindow, from: nil)
         let hitRow = row(at: origin)
         let additive = event.modifierFlags.contains(windowsSelection ? .control : .command)
@@ -88,10 +92,45 @@ final class ExplorerFileTable: NSTableView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        window?.makeFirstResponder(self)
         let hit = row(at: convert(event.locationInWindow, from: nil))
         if hit >= 0 && !selectedRowIndexes.contains(hit) { selectRowIndexes(IndexSet(integer: hit), byExtendingSelection: false) }
         if hit < 0 { deselectAll(nil) }
         return contextMenu?()
+    }
+
+    private var serviceURLs: [URL] {
+        selectedRowIndexes.compactMap { rowURLs.indices.contains($0) ? rowURLs[$0] : nil }
+    }
+
+    override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?, returnType: NSPasteboard.PasteboardType?) -> Any? {
+        if let sendType, Self.serviceTypes.contains(sendType),
+           returnType == nil || returnType?.rawValue.isEmpty == true, !serviceURLs.isEmpty {
+            return self
+        }
+        return super.validRequestor(forSendType: sendType, returnType: returnType)
+    }
+
+    func writeSelection(to pasteboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        let urls = serviceURLs
+        let fileURLs = types.contains(.fileURL)
+        let filenames = types.contains(Self.filenamesType)
+        guard !urls.isEmpty, fileURLs || filenames else { return false }
+        pasteboard.clearContents()
+        if fileURLs {
+            let items = urls.map { url in
+                let item = NSPasteboardItem()
+                item.setString(url.absoluteString, forType: .fileURL)
+                return item
+            }
+            guard pasteboard.writeObjects(items) else { return false }
+        }
+        if filenames {
+            // NSPasteboard translates legacy names; NSPasteboardItem only accepts UTIs.
+            pasteboard.addTypes([Self.filenamesType], owner: nil)
+            return pasteboard.setPropertyList(urls.map(\.path), forType: Self.filenamesType)
+        }
+        return true
     }
 
 }

@@ -63,6 +63,8 @@ enum TabCloseScope: Int, CaseIterable {
 enum ExplorerAction {
     case command(CommandID)
     case navigate(URL)
+    case openFolderInNewTab(URL)
+    case openWith([URL], application: URL)
     case navigatePath(String)
     case activateTab(UUID)
     case moveTab(UUID, before: UUID?)

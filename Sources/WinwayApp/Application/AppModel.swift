@@ -139,6 +139,11 @@ final class AppModel {
         switch action {
         case .command(let command): execute(command)
         case .navigate(let url): navigate(url)
+        case .openWith(let urls, let application): open(urls, with: application)
+        case .openFolderInNewTab(let url):
+            guard enabledCommands.contains(.newTab),
+                  active.visibleEntries.contains(where: { $0.url == url && $0.isDirectory }) else { return }
+            openNewTab(at: url)
         case .navigatePath(let path):
             let expanded = (path as NSString).expandingTildeInPath
             guard expanded.hasPrefix("/") else { showError("请输入绝对路径或以 ~ 开头的路径。"); return }
@@ -279,8 +284,7 @@ final class AppModel {
         case .selectAll: tabs[activeIndex].selection = Set(active.visibleEntries.map(\.url)); updatePreview()
         case .newFolder: promptNewFolder()
         case .newTab:
-            let tab = BrowserTabState(directory: FileManager.default.homeDirectoryForCurrentUser)
-            tabs.append(tab); activeID = tab.id; preview = .none; refresh()
+            openNewTab(at: FileManager.default.homeDirectoryForCurrentUser)
         case .closeTab: closeTab(activeID)
         case .back: let target = active.navigation.index - 1; navigate(active.navigation.history[target], historyIndex: target)
         case .forward: let target = active.navigation.index + 1; navigate(active.navigation.history[target], historyIndex: target)
@@ -296,6 +300,11 @@ final class AppModel {
             for tab in tabs { navigate(tab.navigation.directory, refresh: true, tabID: tab.id) }
         case .toggleDetails: showDetails.toggle(); render()
         }
+    }
+
+    private func openNewTab(at directory: URL) {
+        let tab = BrowserTabState(directory: directory)
+        tabs.append(tab); activeID = tab.id; preview = .none; refresh()
     }
 
     func closeTab(_ id: UUID) {
@@ -327,6 +336,16 @@ final class AppModel {
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &directory) else { showError("文件已不存在：\(url.lastPathComponent)"); refresh(); return }
         if directory.boolValue { navigate(url); return }
         NSWorkspace.shared.open(url, configuration: .init()) { [weak self] _, error in
+            if let error { Task { @MainActor in self?.showError(error.localizedDescription) } }
+        }
+    }
+
+    func open(_ urls: [URL], with application: URL) {
+        guard !urls.isEmpty else { return }
+        if let missing = urls.first(where: { !$0.isFileURL || !FileManager.default.fileExists(atPath: $0.path) }) {
+            showError("文件已不存在：\(missing.lastPathComponent)"); refresh(); return
+        }
+        NSWorkspace.shared.open(urls, withApplicationAt: application, configuration: .init()) { [weak self] _, error in
             if let error { Task { @MainActor in self?.showError(error.localizedDescription) } }
         }
     }

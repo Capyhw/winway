@@ -50,6 +50,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         app.addItem(withTitle: "关于 Winway", action: #selector(about), keyEquivalent: "").target = self
         add(.settings, to: app)
         app.addItem(.separator())
+        let services = NSMenu(title: "服务")
+        let servicesItem = NSMenuItem(title: "服务", action: nil, keyEquivalent: "")
+        servicesItem.submenu = services; app.addItem(servicesItem)
+        NSApp.servicesMenu = services
+        app.addItem(.separator())
         app.addItem(withTitle: "隐藏 Winway", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         app.addItem(withTitle: "退出 Winway", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         for (title, commands): (String, [CommandID]) in [

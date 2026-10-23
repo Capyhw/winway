@@ -82,6 +82,29 @@ struct TabsRunner {
         verifyTabInteraction()
         verifyReordering(root: root)
         verifyDragDestination()
+        verifyOpenFolderInNewTab(root: root)
+    }
+
+    @MainActor
+    static func verifyOpenFolderInNewTab(root: URL) {
+        let model = AppModel(directory: root, settingsURL: root.appendingPathComponent("keyboard.json"))
+        let folder = root.appendingPathComponent("Child", isDirectory: true)
+        try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("file.txt")
+        model.tabs[0].entries = [FileEntry(url: folder, name: "Child", isDirectory: true),
+                                 FileEntry(url: file, name: "file.txt", isDirectory: false)]
+        model.tabs[0].selection = [folder]
+        model.tabs[0].scrollOffset = 64
+        let original = model.active
+        model.handle(.openFolderInNewTab(file))
+        precondition(model.tabs.count == 1, "Files must not create directory tabs")
+        model.handle(.openFolderInNewTab(folder))
+        precondition(model.tabs.count == 2 && model.activeID != original.id)
+        precondition(model.active.navigation.directory == folder, "The new tab must open the clicked folder")
+        precondition(model.tabs[0].navigation.history == original.navigation.history)
+        precondition(model.tabs[0].selection == original.selection && model.tabs[0].scrollOffset == original.scrollOffset)
+        precondition(model.active.selection.isEmpty && model.active.filter.isEmpty)
+        print("PASS: folder context action opens and activates the target directory in a new tab, preserving the source tab")
     }
 
     @MainActor

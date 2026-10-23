@@ -189,6 +189,7 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     private func buildTable() {
+        NSApp.registerServicesMenuSendTypes(ExplorerFileTable.serviceTypes, returnTypes: [])
         fileTable.dataSource = self; fileTable.delegate = self; fileTable.rowHeight = 32
         fileTable.intercellSpacing = .zero; fileTable.style = .plain; fileTable.backgroundColor = .white
         fileTable.allowsMultipleSelection = true; fileTable.allowsEmptySelection = true
@@ -204,7 +205,7 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
             fileTable.addTableColumn(column)
         }
         fileTable.openSelection = { [weak self] in self?.emit(.open) }
-        fileTable.contextMenu = { [weak self] in self?.commandMenu([.open,.cut,.copy,.paste,.rename,.trash,.newFolder,.refresh,.settings]) ?? NSMenu() }
+        fileTable.contextMenu = { [weak self] in self?.fileContextMenu() ?? NSMenu() }
         fileTable.setAccessibilityLabel("文件列表")
         fileScroll.documentView = fileTable; fileScroll.hasVerticalScroller = true; fileScroll.hasHorizontalScroller = true
         fileScroll.autohidesScrollers = true; fileScroll.drawsBackground = false; fileScroll.borderType = .noBorder
@@ -495,6 +496,54 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         onAction(.command(command))
     }
     private func showMenu(_ menu: NSMenu, from view: NSView) { menu.popUp(positioning: nil,at: NSPoint(x: 0,y: view.bounds.height+2),in: view) }
+    private func fileContextMenu() -> NSMenu {
+        // menu(for:) has already selected the clicked row or cleared the selection.
+        let entries = fileTable.selectedRowIndexes.compactMap { snapshot.entries.indices.contains($0) ? snapshot.entries[$0] : nil }
+        if entries.isEmpty {
+            let menu = commandMenu([.newFolder, .paste])
+            menu.addItem(.separator())
+            let sort = NSMenuItem(title: "排序方式", action: nil, keyEquivalent: "")
+            sort.submenu = sortMenu(); menu.addItem(sort)
+            let view = NSMenuItem(title: "显示", action: nil, keyEquivalent: "")
+            view.submenu = commandMenu([.toggleDetails, .toggleHidden]); menu.addItem(view)
+            menu.addItem(.separator())
+            appendCommands([.refresh], to: menu)
+            return menu
+        }
+
+        let menu = commandMenu([.open])
+        menu.allowsContextMenuPlugIns = true
+        if entries.allSatisfy({ !$0.isDirectory }) {
+            let item = NSMenuItem(title: "打开方式", action: nil, keyEquivalent: "")
+            item.submenu = ExplorerOpenWithMenu(urls: entries.map(\.url)) { [weak self] urls, application in
+                self?.onAction(.openWith(urls, application: application))
+            }
+            menu.addItem(item)
+        }
+        if entries.count == 1, let folder = entries.first, folder.isDirectory {
+            let item = NSMenuItem(title: "在新标签页中打开", action: #selector(openFolderInNewTab(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = folder.url
+            item.isEnabled = snapshot.enabledCommands.contains(.newTab)
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        appendCommands([.cut, .copy], to: menu)
+        menu.addItem(.separator())
+        if entries.count == 1 { appendCommands([.rename], to: menu) }
+        appendCommands([.trash], to: menu)
+        return menu
+    }
+    private func appendCommands(_ commands: [CommandID], to menu: NSMenu) {
+        let group = commandMenu(commands)
+        for item in group.items {
+            group.removeItem(item)
+            menu.addItem(item)
+        }
+    }
+    @objc private func openFolderInNewTab(_ sender: NSMenuItem) {
+        guard snapshot.enabledCommands.contains(.newTab), let url = sender.representedObject as? URL else { return }
+        onAction(.openFolderInNewTab(url))
+    }
     private func commandMenu(_ commands: [CommandID]) -> NSMenu {
         let menu = NSMenu(); menu.autoenablesItems = false
         for command in commands {

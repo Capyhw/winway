@@ -94,6 +94,9 @@ struct UIComponentRunner {
         verifyWindowButtons()
         verifyMouseNavigation()
         verifyControlClickSelection()
+        verifyFileContextMenus()
+        verifyOpenWithMenus()
+        verifyFileServices()
         verifyRubberBandSelection()
         verifyTabStripLayout()
         verifyBreadcrumbInteraction()
@@ -506,6 +509,138 @@ struct UIComponentRunner {
             table.deselectAll(nil)
         }
         print("PASS: upward rubber-band selection, border pixels over selected rows and empty space, scroll coordinates, event passthrough and mouse-up cleanup")
+    }
+
+    @MainActor
+    static func verifyFileContextMenus() {
+        var snapshot = ExplorerSnapshot()
+        snapshot.entries = [
+            FileEntry(url: URL(fileURLWithPath: "/tmp/menu-folder"), name: "menu-folder", isDirectory: true),
+            FileEntry(url: URL(fileURLWithPath: "/tmp/menu-file.txt"), name: "menu-file.txt", isDirectory: false),
+            FileEntry(url: URL(fileURLWithPath: "/tmp/menu-other.txt"), name: "menu-other.txt", isDirectory: false)
+        ]
+        snapshot.enabledCommands = Set(CommandID.allCases).subtracting([.paste])
+        var actions: [ExplorerAction] = []
+        let controller = ExplorerWindowController { actions.append($0) }
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        controller.render(snapshot)
+        let table = controller.fileTable
+        func menu(at row: Int?) -> NSMenu {
+            let y = row.map { table.rect(ofRow: $0).midY } ?? (table.rect(ofRow: 2).maxY + 30)
+            let event = NSEvent.mouseEvent(with: .rightMouseDown,
+                                          location: table.convert(NSPoint(x: 70, y: y), to: nil), modifierFlags: [],
+                                          timestamp: 0, windowNumber: controller.window!.windowNumber,
+                                          context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            return table.menu(for: event)!
+        }
+        func commands(_ menu: NSMenu) -> [CommandID] {
+            menu.items.compactMap { ($0.representedObject as? String).flatMap(CommandID.init(rawValue:)) }
+        }
+        func checkSeparators(_ menu: NSMenu) {
+            precondition(menu.items.first?.isSeparatorItem == false && menu.items.last?.isSeparatorItem == false)
+            precondition(!zip(menu.items, menu.items.dropFirst()).contains { $0.isSeparatorItem && $1.isSeparatorItem })
+        }
+        let file = menu(at: 1)
+        precondition(commands(file) == [.open, .cut, .copy, .rename, .trash])
+        precondition(!file.items.contains { $0.title == "在新标签页中打开" })
+        let folder = menu(at: 0)
+        precondition(table.selectedRowIndexes == IndexSet(integer: 0), "Right-click must target the clicked folder")
+        let openInTab = folder.items.first { $0.title == "在新标签页中打开" }!
+        precondition(openInTab.isEnabled)
+        _ = NSApp.sendAction(openInTab.action!, to: openInTab.target, from: openInTab)
+        precondition(actions.contains { if case .openFolderInNewTab(let url) = $0 { return url == snapshot.entries[0].url }; return false })
+        table.selectRowIndexes(IndexSet([0, 1]), byExtendingSelection: false)
+        let mixed = menu(at: 0)
+        precondition(table.selectedRowIndexes == IndexSet([0, 1]), "Right-click within a selection must preserve the batch")
+        precondition(commands(mixed) == [.open, .cut, .copy, .trash])
+        precondition(!mixed.items.contains { $0.title == "在新标签页中打开" })
+        let other = menu(at: 2)
+        precondition(table.selectedRowIndexes == IndexSet(integer: 2), "Right-click outside a selection must replace it")
+        precondition(commands(other).contains(.rename))
+        let blank = menu(at: nil)
+        precondition(table.selectedRowIndexes.isEmpty, "Blank-space menus must clear the previous target")
+        precondition(commands(blank) == [.newFolder, .paste, .refresh])
+        precondition(blank.items.first { $0.representedObject as? String == CommandID.paste.rawValue }?.isEnabled == false)
+        precondition(blank.items.first { $0.title == "排序方式" }?.submenu != nil)
+        precondition(commands(blank.items.first { $0.title == "显示" }!.submenu!) == [.toggleDetails, .toggleHidden])
+        for menu in [file, folder, mixed, other, blank] { checkSeparators(menu) }
+        snapshot.entries = []
+        snapshot.enabledCommands.insert(.paste)
+        controller.render(snapshot)
+        let empty = table.contextMenu!()
+        precondition(commands(empty) == [.newFolder, .paste, .refresh])
+        precondition(empty.items.first { $0.representedObject as? String == CommandID.paste.rawValue }?.isEnabled == true)
+        print("PASS: distinct blank/file/folder/multiple-selection menus, clicked target, folder action, empty directory, paste availability and separators")
+    }
+
+    @MainActor
+    static func verifyOpenWithMenus() {
+        let first = URL(fileURLWithPath: "/tmp/中文 压缩包.zip")
+        let second = URL(fileURLWithPath: "/tmp/另一个.rar")
+        let universal = URL(fileURLWithPath: "/Applications/Archive.app")
+        let zipOnly = URL(fileURLWithPath: "/Applications/ZIP.app")
+        var received: ([URL], URL)?
+        let menu = ExplorerOpenWithMenu(urls: [first, second]) { received = ($0, $1) }
+        menu.applicationsForURL = { $0 == first ? [zipOnly, universal, universal] : [universal] }
+        menu.defaultApplicationForURL = { _ in universal }
+        menu.menuNeedsUpdate(menu)
+        precondition(menu.items.count == 1 && menu.items[0].title.hasSuffix("（默认）"))
+        precondition(menu.items[0].representedObject as? URL == universal)
+        _ = NSApp.sendAction(menu.items[0].action!, to: menu.items[0].target, from: menu.items[0])
+        precondition(received?.0 == [first, second] && received?.1 == universal, "Opening must preserve all captured URLs")
+        menu.defaultApplicationForURL = { $0 == first ? zipOnly : universal }
+        menu.menuNeedsUpdate(menu)
+        precondition(!menu.items[0].title.contains("默认"), "Mixed defaults must not be labeled as a common default")
+        menu.applicationsForURL = { $0 == first ? [zipOnly] : [universal] }
+        menu.menuNeedsUpdate(menu)
+        precondition(menu.items.count == 1 && !menu.items[0].isEnabled && menu.items[0].action == nil)
+
+        let single = ExplorerOpenWithMenu(urls: [first]) { _, _ in }
+        single.applicationsForURL = { _ in [universal, zipOnly, universal] }
+        single.defaultApplicationForURL = { _ in zipOnly }
+        single.menuNeedsUpdate(single)
+        precondition(single.items.count == 2 && single.items[0].representedObject as? URL == zipOnly)
+        print("PASS: Open With common-app intersection, deduplication, default-first ordering, mixed defaults, empty results and captured multi-file handoff")
+    }
+
+    @MainActor
+    static func verifyFileServices() {
+        var snapshot = ExplorerSnapshot()
+        snapshot.entries = [
+            FileEntry(url: URL(fileURLWithPath: "/tmp/服务测试/中文 空格.zip"), name: "中文 空格.zip", isDirectory: false),
+            FileEntry(url: URL(fileURLWithPath: "/tmp/服务测试/文件夹", isDirectory: true), name: "文件夹", isDirectory: true)
+        ]
+        snapshot.selection = Set(snapshot.entries.map(\.url))
+        let controller = ExplorerWindowController { _ in }
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        controller.render(snapshot)
+        let table = controller.fileTable
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        let generalChange = NSPasteboard.general.changeCount
+        let legacy = ExplorerFileTable.filenamesType
+        for type in ExplorerFileTable.serviceTypes {
+            precondition(table.validRequestor(forSendType: type, returnType: nil) as? ExplorerFileTable === table)
+        }
+        precondition(table.validRequestor(forSendType: .string, returnType: nil) == nil)
+        precondition(table.validRequestor(forSendType: .fileURL, returnType: .string) == nil, "File services must not promise to replace a selection with returned text")
+        let expected = snapshot.entries.map(\.url)
+        precondition(table.writeSelection(to: board, types: [.fileURL]))
+        precondition(board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] == expected)
+        precondition(table.writeSelection(to: board, types: [.fileURL, legacy]))
+        let actual = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        // AppKit's legacy conversion removes the directory's trailing slash.
+        precondition(actual?.map(\.path) == expected.map(\.path), "The service pasteboard must retain every file path, including Unicode and spaces")
+        precondition(board.propertyList(forType: legacy) as? [String] == expected.map(\.path))
+        precondition(table.writeSelection(to: board, types: [legacy]))
+        precondition(board.propertyList(forType: legacy) as? [String] == expected.map(\.path))
+        precondition(NSPasteboard.general.changeCount == generalChange, "Services must not overwrite the user's clipboard")
+        let previousChange = board.changeCount
+        precondition(!table.writeSelection(to: board, types: [.string]) && board.changeCount == previousChange)
+        table.deselectAll(nil)
+        precondition(table.validRequestor(forSendType: .fileURL, returnType: nil) == nil)
+        precondition(!table.writeSelection(to: board, types: [.fileURL]))
+        print("PASS: Services requestor validation, multi-file URLs and legacy paths, Unicode, folders, empty selection and clipboard isolation")
     }
 
     @MainActor
