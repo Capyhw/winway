@@ -131,6 +131,7 @@ final class AppModel {
         snapshot.sortKey = active.sort.rawValue
         snapshot.sortAscending = active.ascending
         snapshot.canCancelTask = cancellation != nil || active.isSearching
+        snapshot.canMoveFiles = !busy
         controller.render(snapshot)
         onRender?()
     }
@@ -140,6 +141,9 @@ final class AppModel {
         case .command(let command): execute(command)
         case .navigate(let url): navigate(url)
         case .openWith(let urls, let application): open(urls, with: application)
+        case .moveFiles(let urls, let destination):
+            guard !busy, let sources = ExplorerFileDrop.movableSources(urls, to: destination) else { return }
+            transfer(sources: sources, destination: destination, kind: .move)
         case .openFolderInNewTab(let url):
             guard enabledCommands.contains(.newTab),
                   active.visibleEntries.contains(where: { $0.url == url && $0.isDirectory }) else { return }

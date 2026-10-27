@@ -131,6 +131,10 @@ final class ExplorerTabView: ExplorerSurface, NSDraggingSource {
     override func mouseEntered(with event: NSEvent) { hovered = true }
     override func mouseExited(with event: NSEvent) { hovered = false }
 
+    // Native drags have their own enter/update/exit lifecycle; a tracking-area
+    // mouseExited is not sufficient to clear feedback when a drag is cancelled.
+    func setDragHovered(_ isInside: Bool) { hovered = isInside }
+
     private func updateBackground() {
         let base: NSColor = isSelected ? .white : ExplorerStyle.chrome
         let color = pressed ? ExplorerStyle.selected : (hovered ? base.blended(withFraction: isSelected ? 0.3 : 0.55, of: ExplorerStyle.border) ?? base : base)

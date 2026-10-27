@@ -51,6 +51,9 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
     private var locationLayoutKey = ""
     private var detailKey = ""
     private var previousTab: UUID?
+    private var validatedFileDrop: (sequence: Int, destination: URL)?
+    private var hoverFileDrop: (sequence: Int, pasteboardChange: Int, source: ObjectIdentifier,
+                               destination: URL, sources: [URL]?)?
     
     init(onAction: @escaping (ExplorerAction) -> Void) {
         self.onAction = onAction
@@ -110,6 +113,8 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         tabsScroll.horizontalScrollElasticity = .automatic
         tabsScroll.documentView = tabsBody; tabBar.addSubview(tabsScroll)
         tabsBody.onMove = { [weak self] id, next in self?.onAction(.moveTab(id, before: next)) }
+        tabsBody.onFileHover = { [weak self] id in self?.onAction(.activateTab(id)) }
+        fileTable.onFileDragEnded = { [weak self] in self?.tabsBody.finishFileHover() }
         newTabButton = ExplorerButton(icon: "plus", tooltip: "新建标签页", action: { [weak self] in self?.emit(.newTab) })
         tabBar.addSubview(newTabButton)
         buildNavigation(); buildCommandBar(); buildTable(); buildSidebar()
@@ -192,6 +197,7 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
     private func buildTable() {
         NSApp.registerServicesMenuSendTypes(ExplorerFileTable.serviceTypes, returnTypes: [])
         fileTable.dataSource = self; fileTable.delegate = self; fileTable.rowHeight = 32
+        fileTable.registerForDraggedTypes([.fileURL])
         fileTable.intercellSpacing = .zero; fileTable.style = .plain; fileTable.backgroundColor = .white
         fileTable.allowsMultipleSelection = true; fileTable.allowsEmptySelection = true
         fileTable.selectionHighlightStyle = .regular; fileTable.focusRingType = .none
@@ -238,7 +244,12 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
            tabChanged || directoryChanged || !new.entries.contains(where: { $0.url == url }) {
             finishRename(commit: false, restoreFocus: false)
         }
+        if entriesChanged || tabChanged || snapshot.canMoveFiles != new.canMoveFiles {
+            hoverFileDrop = nil
+            validatedFileDrop = nil
+        }
         snapshot = new
+        tabsBody.activeTabID = new.activeTabID
         if (tabChanged || directoryChanged) && !pathField.isHidden {
             window?.makeFirstResponder(fileTable)
             setAddressEditing(false)
@@ -251,10 +262,13 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         searchField.placeholderString = "搜索 \(new.directory.lastPathComponent) 及子文件夹"
         fileTable.tableColumns.first { $0.identifier.rawValue == "location" }?.isHidden = new.filter.isEmpty
         fileTable.windowsSelection = new.preset == .windows
+        fileTable.canDragFiles = new.canMoveFiles
         fileTable.contextID = new.activeTabID; fileTable.rowURLs = new.entries.map(\.url)
         if entriesChanged { fileTable.reloadData() }
         let indexes = IndexSet(new.entries.indices.filter { new.selection.contains(new.entries[$0].url) })
         if indexes != fileTable.selectedRowIndexes { fileTable.selectRowIndexes(indexes, byExtendingSelection: false) }
+        if tabChanged || directoryChanged { fileTable.fileDropTarget = nil }
+        fileTable.refreshFileDragAppearance()
         for (command, button) in buttons {
             button.isEnabled = new.enabledCommands.contains(command)
             if command == .back { button.isEnabled = new.canGoBack }
@@ -581,7 +595,15 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
     @objc private func scrolled() { positionRenameEditor(); if !rendering { onAction(.scroll(max(0,fileScroll.contentView.bounds.origin.y + fileScroll.contentView.contentInsets.top))) } }
 
     func numberOfRows(in tableView: NSTableView) -> Int { snapshot.entries.count }
-    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { ExplorerRowView() }
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let view = ExplorerRowView()
+        if snapshot.entries.indices.contains(row) {
+            let url = snapshot.entries[row].url
+            view.isFileDragSource = fileTable.draggedFileURLs.contains(url)
+            view.isFileDropTarget = fileTable.fileDropTarget == url
+        }
+        return view
+    }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard row < snapshot.entries.count,let column = tableColumn else { return nil }
         let entry = snapshot.entries[row]; let key = column.identifier.rawValue
@@ -752,5 +774,61 @@ extension ExplorerWindowController {
         let metadata = NSHostingView(rootView: ExplorerMetadataView(entry: entry))
         metadata.frame = NSRect(x: 16,y: 342,width: 266,height: 220)
         detailBody.addSubview(metadata)
+    }
+}
+
+extension ExplorerWindowController {
+    private func fileDrop(_ info: NSDraggingInfo, row: Int, usingHoverCache: Bool = false) -> (sources: [URL], destination: URL)? {
+        guard snapshot.canMoveFiles, let source = info.draggingSource as? ExplorerFileTable,
+              info.draggingSourceOperationMask.contains(.move),
+              row == -1 || (snapshot.entries.indices.contains(row) && snapshot.entries[row].isDirectory) else {
+            hoverFileDrop = nil
+            return nil
+        }
+        let destination = row == -1 ? snapshot.directory : snapshot.entries[row].url
+        let change = info.draggingPasteboard.changeCount
+        if usingHoverCache, let cached = hoverFileDrop,
+           cached.sequence == info.draggingSequenceNumber, cached.pasteboardChange == change,
+           cached.source == ObjectIdentifier(source), cached.destination == destination {
+            return cached.sources.map { ($0, destination) }
+        }
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        let sources = urls.flatMap { ExplorerFileDrop.movableSources($0, to: destination) }
+        // Mouse motion over the same row must not do filesystem I/O on every
+        // event. A real drop always bypasses this cache and revalidates on disk.
+        if usingHoverCache {
+            hoverFileDrop = (info.draggingSequenceNumber, change, ObjectIdentifier(source), destination, sources)
+        }
+        return sources.map { ($0, destination) }
+    }
+
+    func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo,
+                   proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+        validatedFileDrop = nil
+        guard tableView === fileTable else { return [] }
+        // Use the folder under the pointer even when AppKit proposes an insert
+        // between sorted rows. Files are moved into folders, never reordered.
+        let pointedRow = fileTable.row(at: fileTable.convert(info.draggingLocation, from: nil))
+        let targetRow = snapshot.entries.indices.contains(pointedRow) && snapshot.entries[pointedRow].isDirectory ? pointedRow : -1
+        guard let drop = fileDrop(info, row: targetRow, usingHoverCache: true) else { fileTable.fileDropTarget = nil; return [] }
+        if row != targetRow || dropOperation != .on { tableView.setDropRow(targetRow, dropOperation: .on) }
+        fileTable.fileDropTarget = targetRow == -1 ? nil : drop.destination
+        // Inherit the formation from the source session. Reapplying it on
+        // every update can restart AppKit's drag-image transition animation.
+        validatedFileDrop = (info.draggingSequenceNumber, drop.destination)
+        if info.numberOfValidItemsForDrop != drop.sources.count { info.numberOfValidItemsForDrop = drop.sources.count }
+        return .move
+    }
+
+    func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo,
+                   row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+        defer { validatedFileDrop = nil; hoverFileDrop = nil; fileTable.fileDropTarget = nil }
+        guard tableView === fileTable, dropOperation == .on,
+              let drop = fileDrop(info, row: row),
+              validatedFileDrop?.sequence == info.draggingSequenceNumber,
+              validatedFileDrop?.destination == drop.destination else { return false }
+        onAction(.moveFiles(drop.sources, to: drop.destination))
+        return true
     }
 }

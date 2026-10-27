@@ -4,6 +4,10 @@ import AppKit
 /// Commit once on drop; cancellation restores the original order and state.
 final class ExplorerTabStrip: ExplorerSurface {
     var onMove: ((UUID, UUID?) -> Void)?
+    var onFileHover: ((UUID) -> Void)?
+    var activeTabID: UUID?
+    private var fileHover: (id: UUID, sequence: Int, beganAt: TimeInterval)?
+    static let fileHoverDelay: TimeInterval = 0.6
     private var previewOrder: [UUID]?
     private weak var draggedTab: ExplorerTabView?
     private let tabWidth: CGFloat = 220
@@ -13,7 +17,7 @@ final class ExplorerTabStrip: ExplorerSurface {
 
     init() {
         super.init(color: ExplorerStyle.titlebar)
-        registerForDraggedTypes([ExplorerTabView.pasteboardType])
+        registerForDraggedTypes([ExplorerTabView.pasteboardType, .fileURL])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -75,6 +79,21 @@ final class ExplorerTabStrip: ExplorerSurface {
     override func wantsPeriodicDraggingUpdates() -> Bool { true }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if sender.draggingSource is ExplorerFileTable {
+            cancelReordering()
+            guard sender.draggingSourceOperationMask.contains(.move),
+                  sender.draggingPasteboard.availableType(from: [.fileURL]) != nil else {
+                finishFileHover()
+                return []
+            }
+            let point = convert(sender.draggingLocation, from: nil)
+            updateFileHover(at: point, sequence: sender.draggingSequenceNumber)
+            // Activation can rebuild the tab views, so update the current views.
+            updateTabHover(at: point)
+            // The strip only spring-loads a tab. A move is accepted by its list.
+            return []
+        }
+        fileHover = nil
         guard let source = sourceTab(sender) else { cancelReordering(); return [] }
         if let scroll = enclosingScrollView {
             let point = scroll.contentView.convert(sender.draggingLocation, from: nil)
@@ -90,10 +109,35 @@ final class ExplorerTabStrip: ExplorerSurface {
         return .move
     }
 
-    override func draggingExited(_ sender: NSDraggingInfo?) { cancelReordering() }
-    override func draggingEnded(_ sender: NSDraggingInfo) { cancelReordering() }
+    func updateFileHover(at point: NSPoint, sequence: Int,
+                         now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        guard let tab = tabs.first(where: { $0.frame.contains(point) }), tab.tabID != activeTabID else {
+            fileHover = nil
+            return
+        }
+        guard let hover = fileHover, hover.id == tab.tabID, hover.sequence == sequence else {
+            fileHover = (tab.tabID, sequence, now)
+            return
+        }
+        guard now - hover.beganAt >= Self.fileHoverDelay else { return }
+        fileHover = nil
+        onFileHover?(tab.tabID)
+    }
+
+    private func updateTabHover(at point: NSPoint?) {
+        for tab in tabs { tab.setDragHovered(point.map { tab.frame.contains($0) } ?? false) }
+    }
+
+    func finishFileHover() {
+        fileHover = nil
+        updateTabHover(at: nil)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) { finishFileHover(); cancelReordering() }
+    override func draggingEnded(_ sender: NSDraggingInfo) { finishFileHover(); cancelReordering() }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        finishFileHover()
         guard let source = sourceTab(sender) else { return false }
         previewMove(source, at: convert(sender.draggingLocation, from: nil))
         let order = orderedTabIDs

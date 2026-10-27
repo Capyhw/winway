@@ -145,6 +145,8 @@ final class ExplorerButton: NSButton {
 }
 
 final class ExplorerRowView: NSTableRowView {
+    var isFileDragSource = false { didSet { if oldValue != isFileDragSource { updateFileDragAppearance() } } }
+    var isFileDropTarget = false { didSet { if oldValue != isFileDropTarget { updateFileDragAppearance() } } }
     private var hoverTracking: NSTrackingArea?
     private(set) var hovered = false { didSet { if oldValue != hovered { needsDisplay = true } } }
     override var isEmphasized: Bool { get { false } set {} }
@@ -162,14 +164,35 @@ final class ExplorerRowView: NSTableRowView {
     override func mouseExited(with event: NSEvent) { hovered = false }
     override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)
-        if hovered && !isSelected {
+        if isFileDropTarget {
+            ExplorerStyle.accent.setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
+        } else if hovered && !isSelected {
             ExplorerStyle.chrome.setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
         }
     }
     override func drawSelection(in dirtyRect: NSRect) {
-        ExplorerStyle.selected.setFill()
+        (isFileDropTarget ? ExplorerStyle.accent : isFileDragSource ? ExplorerStyle.border : ExplorerStyle.selected).setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 0, dy: 0), xRadius: 4, yRadius: 4).fill()
+    }
+
+    override func drawDraggingDestinationFeedback(in dirtyRect: NSRect) {
+        if !isFileDropTarget { super.drawDraggingDestinationFeedback(in: dirtyRect) }
+    }
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        updateFileDragAppearance()
+    }
+
+    private func updateFileDragAppearance() {
+        needsDisplay = true
+        for cell in subviews.compactMap({ $0 as? NSTableCellView }) {
+            cell.alphaValue = isFileDragSource && !isFileDropTarget ? 0.5 : 1
+            cell.textField?.textColor = isFileDropTarget ? .white :
+                (cell.identifier?.rawValue == "name" ? ExplorerStyle.text : ExplorerStyle.secondary)
+        }
     }
 }
 

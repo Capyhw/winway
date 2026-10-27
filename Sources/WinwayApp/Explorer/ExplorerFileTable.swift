@@ -39,20 +39,32 @@ final class ExplorerFileTable: NSTableView, @MainActor NSServicesMenuRequestor {
     var contextMenu: (() -> NSMenu)?
     var contextID = UUID()
     var rowURLs: [URL] = []
+    var canDragFiles = true
+    var onFileDragEnded: (() -> Void)?
+    private(set) var draggedFileURLs: Set<URL> = []
+    var fileDropTarget: URL? { didSet { if oldValue != fileDropTarget { refreshFileDragAppearance() } } }
     private var anchors: [UUID: URL] = [:]
+    private var filePress: (origin: NSPoint, urls: [URL], collapseTo: URL?, context: UUID)?
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { deselectAll(nil); return }
+        if event.keyCode == 53 {
+            let wasDragging = !draggedFileURLs.isEmpty
+            finishFileDrag()
+            if !wasDragging { deselectAll(nil) }
+            return
+        }
         super.keyDown(with: event)
     }
 
     override func mouseDown(with event: NSEvent) {
+        finishFileDrag()
         window?.makeFirstResponder(self)
         let origin = convert(event.locationInWindow, from: nil)
         let hitRow = row(at: origin)
         let additive = event.modifierFlags.contains(windowsSelection ? .control : .command)
         let range = event.modifierFlags.contains(.shift)
         if hitRow >= 0 {
+            let preserveSelection = !range && !additive && selectedRowIndexes.contains(hitRow)
             if range, let anchorURL = anchors[contextID], let selectionAnchor = rowURLs.firstIndex(of: anchorURL) {
                 selectRowIndexes(IndexSet(integersIn: min(selectionAnchor, hitRow)...max(selectionAnchor, hitRow)), byExtendingSelection: additive)
             } else if additive {
@@ -60,11 +72,16 @@ final class ExplorerFileTable: NSTableView, @MainActor NSServicesMenuRequestor {
                 if selected.contains(hitRow) { selected.remove(hitRow) } else { selected.insert(hitRow) }
                 selectRowIndexes(selected, byExtendingSelection: false)
                 if rowURLs.indices.contains(hitRow) { anchors[contextID] = rowURLs[hitRow] }
-            } else {
+            } else if !preserveSelection {
                 selectRowIndexes(IndexSet(integer: hitRow), byExtendingSelection: false)
                 if rowURLs.indices.contains(hitRow) { anchors[contextID] = rowURLs[hitRow] }
             }
-            if event.clickCount == 2 { openSelection?() }
+            if event.clickCount == 2 {
+                selectRowIndexes(IndexSet(integer: hitRow), byExtendingSelection: false)
+                openSelection?()
+            } else if selectedRowIndexes.contains(hitRow), rowURLs.indices.contains(hitRow) {
+                filePress = (origin, serviceURLs, preserveSelection ? rowURLs[hitRow] : nil, contextID)
+            }
             return
         }
         let initial = additive ? selectedRowIndexes : IndexSet()
@@ -91,7 +108,76 @@ final class ExplorerFileTable: NSTableView, @MainActor NSServicesMenuRequestor {
         }
     }
 
+    override func mouseDragged(with event: NSEvent) {
+        guard canDragFiles, let press = filePress, press.context == contextID else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard hypot(point.x - press.origin.x, point.y - press.origin.y) >= 5 else { return }
+        filePress = nil
+        let currentURLs = Set(rowURLs)
+        guard !press.urls.isEmpty, press.urls.allSatisfy({ currentURLs.contains($0) }) else { return }
+        let items = ExplorerFileDragPreview.items(for: press.urls, at: NSPoint(x: point.x + 12, y: point.y + 10))
+        showDraggedFiles(Set(press.urls))
+        let session = beginDraggingSession(with: items, event: event, source: self)
+        session.draggingFormation = .list
+        session.animatesToStartingPositionsOnCancelOrFail = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { finishFileDrag() }
+        guard let press = filePress, press.context == contextID,
+              let url = press.collapseTo, let row = rowURLs.firstIndex(of: url) else { return }
+        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        anchors[contextID] = url
+    }
+
+    override func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .withinApplication ? .move : []
+    }
+
+    override func ignoreModifierKeys(for session: NSDraggingSession) -> Bool { true }
+
+    override func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        finishFileDrag()
+    }
+
+    private func finishFileDrag() {
+        filePress = nil
+        if !draggedFileURLs.isEmpty {
+            showDraggedFiles([])
+            onFileDragEnded?()
+        }
+        fileDropTarget = nil
+    }
+
+    func showDraggedFiles(_ urls: Set<URL>) {
+        draggedFileURLs = urls
+        refreshFileDragAppearance()
+    }
+
+    func refreshFileDragAppearance() {
+        enumerateAvailableRowViews { view, row in
+            guard let view = view as? ExplorerRowView else { return }
+            let url = self.rowURLs.indices.contains(row) ? self.rowURLs[row] : nil
+            view.isFileDragSource = url.map { self.draggedFileURLs.contains($0) } ?? false
+            view.isFileDropTarget = url != nil && url == self.fileDropTarget
+        }
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        super.draggingExited(sender)
+        fileDropTarget = nil
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        // NSDraggingDestination declares this optional callback, but NSTableView
+        // does not implement it. Calling super raises an Objective-C exception
+        // and prevents AppKit from finishing the drag's remaining callbacks.
+        (sender.draggingSource as? ExplorerFileTable)?.finishFileDrag()
+        fileDropTarget = nil
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
+        finishFileDrag()
         window?.makeFirstResponder(self)
         let hit = row(at: convert(event.locationInWindow, from: nil))
         if hit >= 0 && !selectedRowIndexes.contains(hit) { selectRowIndexes(IndexSet(integer: hit), byExtendingSelection: false) }

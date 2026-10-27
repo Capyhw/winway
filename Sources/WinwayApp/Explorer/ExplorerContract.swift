@@ -45,6 +45,7 @@ struct ExplorerSnapshot {
     var sortKey = "name"
     var sortAscending = true
     var canCancelTask = false
+    var canMoveFiles = true
 }
 
 enum TabCloseScope: Int, CaseIterable {
@@ -68,6 +69,7 @@ enum ExplorerAction {
     case navigatePath(String)
     case activateTab(UUID)
     case moveTab(UUID, before: UUID?)
+    case moveFiles([URL], to: URL)
     case closeTab(UUID)
     case closeTabs(UUID, TabCloseScope)
     case filter(String)
