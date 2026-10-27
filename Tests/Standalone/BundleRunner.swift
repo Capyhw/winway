@@ -26,6 +26,10 @@ func checkBundle(at applicationURL: URL) throws -> [String: Any] {
     guard let executable = application.executableURL else { throw BundleCheckFailure("Application executable is missing") }
     try requireContained(executable, within: applicationURL)
     try require(FileManager.default.isExecutableFile(atPath: executable.path), "Application binary is not executable")
+    let searchHelper = applicationURL.appendingPathComponent("Contents/Helpers/fsearch")
+    try requireContained(searchHelper, within: applicationURL)
+    try require(FileManager.default.isExecutableFile(atPath: searchHelper.path), "Bundled FSearch helper is missing")
+    try require(FileManager.default.fileExists(atPath: resourceRoot.appendingPathComponent("FSearch-LICENSE.txt").path), "FSearch license is missing")
 
     // This is the first candidate used by SwiftPM's generated Bundle.module
     // accessor in the packaged application. No build-directory fallback is used.

@@ -14,6 +14,9 @@ public struct FileServiceError: Error, LocalizedError, Sendable, Equatable {
 public struct FileSearchResult: Sendable {
     public let entries: [FileEntry]
     public let skippedCount: Int
+    public var isTruncated: Bool = false
+    public var isIndexing: Bool = false
+    public var limitedAccess: Bool = false
 }
 
 public enum FileTransferKind: String, Sendable { case copy, move }

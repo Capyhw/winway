@@ -19,7 +19,7 @@ public struct BrowserTabState: Identifiable, Sendable {
     // during selection/preview updates never repeat the full directory sort.
     public private(set) var visibleEntries: [FileEntry] = []
     private mutating func updateVisibleEntries() {
-        visibleEntries = (filter.isEmpty ? entries : searchEntries ?? entries).filter { filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter) }.sorted { a, b in
+        visibleEntries = (filter.isEmpty ? entries : searchEntries ?? entries.filter { $0.name.localizedCaseInsensitiveContains(filter) }).sorted { a, b in
             if a.isDirectory != b.isDirectory { return a.isDirectory }
             let order: ComparisonResult
             switch sort {

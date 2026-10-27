@@ -21,7 +21,9 @@ git push origin v0.1.0
 
 每次发布使用新版本号，不移动或覆盖已经发布的标签。支持 `v0.1.0-rc.1` 这类预发布标签，自动标记为 Pre-release。版本标签覆盖打包副本的 `CFBundleShortVersionString`（只写入数字部分），构建编号来自 Actions 的 `GITHUB_RUN_NUMBER`，不会自动改写仓库中的 `Packaging/Info.plist`。手动构建则使用该文件中的版本号。
 
-工作流分别在 `macos-15`（Apple Silicon）和 `macos-15-intel`（Intel）上使用 Xcode 26.3 原生构建，执行核心测试、打包资源校验、签名校验和标签/UI 组件回归。两套构建均通过后才发布 Release，并附自动生成的变更说明及签名状态说明。
+工作流分别在 `macos-15`（Apple Silicon）和 `macos-15-intel`（Intel）上使用 Xcode 26.3 原生构建，执行核心测试、打包资源校验、签名校验和标签/UI 组件和真实 FSearch 搜索回归。两套构建均通过后才发布 Release，并附自动生成的变更说明及签名状态说明。
+
+应用包包含 `Contents/Helpers/fsearch` 和 MIT 许可证，辅助程序先独立签名，再签名应用。Apple Silicon 使用 v0.2.1 官方发布包和固定 SHA-256；Intel 使用同一版本的固定提交与 `Cargo.lock` 本机编译，需要 Rust 1.92 或更新版本。具体版本固定在 `scripts/prepare-fsearch.sh`；更新时同步验证 JSON 协议与权限跳过目录列表。
 
 每个架构生成三个文件：
 

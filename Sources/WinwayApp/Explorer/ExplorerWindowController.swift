@@ -155,7 +155,8 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         searchField.focusRingType = .none; searchField.cell?.usesSingleLineMode = true
         searchField.cell?.isScrollable = true
         searchField.setAccessibilitySubrole(.searchField)
-        searchField.delegate = self; searchField.setAccessibilityLabel("按名称搜索当前目录及所有子文件夹")
+        searchField.toolTip = "支持模糊名称、ext:pdf、type:image、grep:内容；范围为当前目录及子文件夹"
+        searchField.delegate = self; searchField.setAccessibilityLabel("使用 FSearch 搜索当前目录及所有子文件夹，支持模糊名称和筛选条件")
         searchSurface.layer?.cornerRadius = 4; searchSurface.layer?.borderWidth = 1
         searchSurface.layer?.borderColor = ExplorerStyle.border.cgColor
         searchIcon.image = ExplorerStyle.image("search", size: 18)
@@ -266,12 +267,12 @@ final class ExplorerWindowController: NSWindowController, NSTableViewDataSource,
         fileTable.headerView?.needsDisplay = true
         updateTabs(); updateLocations(); updateDetails()
         statusLabel.stringValue = "\(new.entries.count) 个项目" + (new.selection.isEmpty ? "" : "    │    已选择 \(new.selection.count) 个项目")
-        jobLabel.stringValue = new.statusMessage ?? (new.isSearching ? "正在搜索当前目录及子文件夹…" : new.isLoading ? "正在读取目录…" : "")
+        jobLabel.stringValue = new.statusMessage ?? (new.isSearching ? "正在查询文件索引…" : new.isLoading ? "正在读取目录…" : "")
         jobLabel.toolTip = new.statusMessage
         cancelButton.isHidden = !new.canCancelTask
         statusDetailsButton.isHidden = new.canCancelTask; statusRootButton.isHidden = new.canCancelTask
         statusDetailsButton.active = new.showDetails
-        let message = new.errorMessage ?? (new.isSearching && new.entries.isEmpty ? "正在搜索当前目录及子文件夹…" : new.isLoading && new.entries.isEmpty ? "正在读取目录…" : new.entries.isEmpty ? (new.filter.isEmpty ? "此文件夹为空" : "没有匹配的项目") : "")
+        let message = new.errorMessage ?? (new.isSearching && new.entries.isEmpty ? "正在查询文件索引…" : new.isLoading && new.entries.isEmpty ? "正在读取目录…" : new.entries.isEmpty ? (new.filter.isEmpty ? "此文件夹为空" : "没有匹配的项目") : "")
         emptyLabel.stringValue = message; emptyLabel.isHidden = message.isEmpty
         emptyLabel.drawsBackground = new.errorMessage != nil; emptyLabel.backgroundColor = .white
         retryButton.isHidden = new.errorMessage == nil; homeButton.isHidden = new.errorMessage == nil

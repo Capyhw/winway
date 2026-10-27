@@ -1,11 +1,11 @@
 # 文件服务实现与验收
 
-`LocalFileService` 实现 `FileServing`。目录读取、递归搜索和文件写入分别在独立串行 DispatchQueue 上执行；读写不会占用 MainActor。主界面负责导航版本、过滤排序、预览、默认应用打开和系统废纸篓。
+`LocalFileService` 实现 `FileServing`。目录读取、索引搜索和文件写入分别在独立串行 DispatchQueue 上执行；读写不会占用 MainActor。主界面负责导航版本、过滤排序、预览、默认应用打开和系统废纸篓。
 
 ## 集成接口
 
 - `listDirectory(_:includeHidden:) async throws -> [FileEntry]`：默认隐藏项不显示，使用 lstat 保留符号链接本身的属性，失效链接仍可见；读取错误绝不转换为空列表。
-- `searchDirectory(_:query:includeHidden:cancellation:)`：按名称不区分大小写搜索当前目录及所有层级子目录，返回匹配项和无法读取的项目数。隐藏目录关闭时整棵跳过；符号链接本身可匹配，但不跟随链接。根目录读取失败抛错，子目录错误跳过并计数。每个项目之间检查取消，不承诺中断正在执行的系统读取。搜索不读取文件正文、不依赖 Spotlight 索引。
+- `searchDirectory(_:query:includeHidden:cancellation:)`：通过 FSearch v0.2.1 的 JSON-lines 接口查询当前目录及子目录，支持模糊名称、筛选条件和内容查询。单次最多处理 10,000 个候选，达到上限会显式提示。返回前校验范围、隐藏祖先和符号链接祖先，重新读取匹配项元数据并跳过失效项；跳过数只统计已返回但无法读取的候选，不代表索引扫描期间的所有错误。等待响应时每 50ms 检查取消，120 秒超时；取消只终止本次 stdio 客户端。没有递归扫描回退，也不依赖 Spotlight。索引权限、更新延迟和内容覆盖范围见 [搜索说明](search.md)。
 - `createDirectory(in:name:)`、`rename(_:to:)`：拒绝空白、`.`、`..`、斜线、空字符和已有名称。不会覆盖已有项目。大小写遵循目标卷能力，同时检查 Unicode 规范等价名称。
 - `transfer(_:cancellation:onProgress:resolveConflict:) async -> FileOperationReport`：`.copy` / `.move`；冲突回调异步返回 `.skip`、`.keepBoth` 或 `.cancel`。回调可进入 MainActor 显示对话框，文件队列在后台等待。
 - 进度包含 `jobID / total / processed / succeeded / failed / currentSource / state`；是项目数，不是伪造的字节百分比。UI 应在 MainActor 上接收事件。

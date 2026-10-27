@@ -104,6 +104,27 @@ struct SearchRunner {
         try await Task.sleep(for: .milliseconds(350))
         precondition(model.tabs.count == 1 && model.activeID == second.id)
         print("PASS: independent tabs, navigation and tab closure reject stale search completion")
+
+        // Exercise the actual pinned engine, including FSEvents updates after startup.
+        let fuzzy = deep.appendingPathComponent("main.swift")
+        try Data("winway_unique_content_marker".utf8).write(to: fuzzy)
+        func searchUntil(_ query: String, _ matches: ([FileEntry]) -> Bool) async throws {
+            let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+            repeat {
+                model.handle(.filter(query))
+                try await waitUntil("FSearch query completion") { !model.active.isSearching }
+                precondition(model.active.searchMessage?.hasPrefix("索引搜索完成") == true, model.active.searchMessage ?? "No search status")
+                if matches(model.active.visibleEntries) { return }
+                try await Task.sleep(for: .milliseconds(100))
+            } while ContinuousClock.now < deadline
+            preconditionFailure("FSearch index did not converge for \(query)")
+        }
+        try await searchUntil("mian.swift") { $0.contains { $0.name == "main.swift" } }
+        try await searchUntil("ext:swift") { $0.map(\.name) == ["main.swift"] }
+        try await searchUntil("grep:winway_unique_content_marker") { $0.map(\.name) == ["main.swift"] }
+        try FileManager.default.removeItem(at: fuzzy)
+        try await searchUntil("ext:swift") { $0.isEmpty }
+        print("PASS: real FSearch fuzzy names, extension/content queries, creation and deletion updates")
         model.controller.close()
     }
 }

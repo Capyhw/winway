@@ -11,7 +11,7 @@ Winway 使用 Swift Package Manager，主界面基于 Swift + AppKit，快捷键
 open dist/Winway.app
 ```
 
-`./scripts/build-app.sh debug` 可生成调试包。普通构建不依赖 Node 或 Rust；应用包当前仅作 ad-hoc 签名，没有 Developer ID 签名或公证。
+`./scripts/build-app.sh debug` 可生成调试包。Swift 编译与核心测试不依赖 Node 或 Rust。应用打包会运行 `scripts/prepare-fsearch.sh`：Apple Silicon 下载并校验固定版本的官方二进制；Intel 从固定提交构建，需 Rust 1.92 或更新版本。应用包当前仅作 ad-hoc 签名，没有 Developer ID 签名或公证。
 
 构建与打包统一通过 `scripts/build.sh`，默认使用 `swiftbuild` 后端与 `xcrun` 选中的 macOS SDK。使用较旧的 Xcode SwiftPM 时，可选择原生后端：
 
@@ -21,6 +21,15 @@ WINWAY_BUILD_SYSTEM=native ./scripts/build-app.sh
 ```
 
 GitHub Actions 使用 Xcode 26.3 的原生后端。打包架构、产物和版本发布步骤见[发布说明](releasing.md)。
+
+只运行开发二进制时，先准备搜索程序并指定路径：
+
+```sh
+export WINWAY_FSEARCH_PATH="$(./scripts/prepare-fsearch.sh)"
+# 随后在此 shell 中启动构建产物；打包的 Winway.app 无需此变量。
+```
+
+FSearch 版本与索引行为见 [搜索说明](search.md)。首次打包需连接 GitHub，辅助程序缓存位于 `.build/fsearch/`。核心搜索测试使用独立协议夹具；`scripts/test-search.sh` 调用真实引擎，会按 FSearch 默认行为建立本机索引并启动共享后台服务。
 
 ## 工具链说明
 

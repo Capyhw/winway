@@ -20,4 +20,5 @@ xcrun swiftc -swift-version 6 -parse-as-library -I "$search_test_root" -L "$sear
   "$project_root/Sources/WinwayApp/Application/AppModel.swift" \
   "$project_root"/Sources/WinwayApp/{Explorer,Settings,Platform}/*.swift \
   "$project_root/Tests/Standalone/SearchRunner.swift" -o "$search_test_root/search-tests"
-WINWAY_TEST_RESOURCE_BUNDLE="$resource_bundle" "$search_test_root/search-tests"
+WINWAY_FSEARCH_PATH="$project_root/dist/Winway.app/Contents/Helpers/fsearch" \
+  WINWAY_TEST_RESOURCE_BUNDLE="$resource_bundle" "$search_test_root/search-tests"

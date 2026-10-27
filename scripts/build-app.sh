@@ -26,7 +26,11 @@ if [[ "$actual_sdk" != "$expected_sdk" || "$actual_minimum" != "$expected_minimu
 fi
 printf 'Verified SDK %s, minimum macOS %s\n' "$actual_sdk" "$actual_minimum"
 app_directory="$project_root/dist/Winway.app"
-mkdir -p "$app_directory/Contents/MacOS" "$app_directory/Contents/Resources"
+fsearch_binary="$("$project_root/scripts/prepare-fsearch.sh")"
+mkdir -p "$app_directory/Contents/MacOS" "$app_directory/Contents/Resources" "$app_directory/Contents/Helpers"
+cp "$fsearch_binary" "$app_directory/Contents/Helpers/fsearch"
+cp "$project_root/ThirdParty/FSearch/LICENSE" "$app_directory/Contents/Resources/FSearch-LICENSE.txt"
+codesign --force --sign - "$app_directory/Contents/Helpers/fsearch"
 cp "$binary_directory/Winway" "$app_directory/Contents/MacOS/Winway"
 cp Packaging/Info.plist "$app_directory/Contents/Info.plist"
 if [[ -n "${WINWAY_VERSION:-}" ]]; then

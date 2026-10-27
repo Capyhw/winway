@@ -3,6 +3,18 @@ import Testing
 @testable import WinwayCore
 
 struct BrowserTabStateTests {
+    @Test func fuzzyAndFilterMatchesAreNotFilteredAgainByLiteralName() {
+        let root = URL(fileURLWithPath: "/fixture")
+        let result = FileEntry(url: root.appendingPathComponent("main.swift"), name: "main.swift", isDirectory: false)
+        var tab = BrowserTabState(directory: root)
+        tab.filter = "mian ext:swift"
+        tab.searchEntries = [result]
+        tab.selection = [result.url]
+        tab.reconcileSelection()
+        #expect(tab.visibleEntries == [result])
+        #expect(tab.selection == [result.url])
+    }
+
     private let root = URL(fileURLWithPath: "/winway-test-browser")
     private func entries(_ count: Int) -> [FileEntry] {
         (1...count).reversed().map { index in

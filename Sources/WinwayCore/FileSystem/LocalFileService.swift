@@ -9,7 +9,9 @@ public final class LocalFileService: FileServing, @unchecked Sendable {
     private let writes = DispatchQueue(label: "app.winway.files.write", qos: .userInitiated)
     private let jobsLock = NSLock()
     private var submittedJobs: Set<UUID> = []
-    public init() {}
+    private let searchClient: FSearchClient
+    public init() { searchClient = FSearchClient() }
+    init(searchClient: FSearchClient) { self.searchClient = searchClient }
 
     public static func resolvePath(_ path: String) -> URL {
         URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
@@ -35,34 +37,54 @@ public final class LocalFileService: FileServing, @unchecked Sendable {
                 }
                 try checkCancellation()
                 guard !query.isEmpty else { return FileSearchResult(entries: [], skippedCount: 0) }
-                var pending = [directory]
+                let root = directory.resolvingSymlinksInPath().standardizedFileURL
+                guard (try self.statFollowing(root).st_mode & S_IFMT) == S_IFDIR else {
+                    throw FileServiceError(.notFound, "搜索目录不存在。", path: directory.path)
+                }
+                guard FileManager.default.isReadableFile(atPath: root.path) else {
+                    throw FileServiceError(.permissionDenied, "没有权限搜索此目录。", path: directory.path)
+                }
+                let response = try self.searchClient.search(directory: root, query: query, cancellation: cancellation)
+                let hits = response.hits ?? response.files ?? []
+                let prefix = root.path == "/" ? "/" : root.path + "/"
                 var matches: [FileEntry] = []
                 var skipped = 0
-                while let folder = pending.popLast() {
+                var seen = Set<String>()
+                // Cache ancestor checks: many hits share the same containing folders.
+                var allowedFolders: [URL: Bool] = [root: true]
+                func allowed(_ folder: URL) throws -> Bool {
                     try checkCancellation()
-                    let children: [URL]
+                    if let value = allowedFolders[folder] { return value }
+                    guard folder.path.hasPrefix(prefix) else { return false }
+                    let entry = try self.readEntry(folder)
+                    let value = try entry.isDirectory && !entry.isSymbolicLink && (includeHidden || !entry.isHidden)
+                        && allowed(folder.deletingLastPathComponent())
+                    allowedFolders[folder] = value
+                    return value
+                }
+                for hit in hits.prefix(FSearchClient.resultLimit) {
+                    try checkCancellation()
+                    let url = URL(fileURLWithPath: hit.path).standardizedFileURL
+                    // Defense in depth: never show a hit outside the requested directory.
+                    guard url.path.hasPrefix(prefix), url != root, seen.insert(url.path).inserted else { continue }
                     do {
-                        // A queued directory may have been replaced with a symbolic link.
-                        if folder != directory, (try self.statLink(folder).st_mode & S_IFMT) != S_IFDIR {
-                            skipped += 1; continue
-                        }
-                        children = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isHiddenKey])
-                    } catch {
-                        if folder == directory { throw error }
-                        skipped += 1; continue
-                    }
-                    for url in children {
-                        try checkCancellation()
-                        let entry: FileEntry
-                        do { entry = try self.readEntry(url) }
-                        catch { skipped += 1; continue }
+                        guard try allowed(url.deletingLastPathComponent()) else { continue }
+                        let entry = try self.readEntry(url)
                         guard includeHidden || !entry.isHidden else { continue }
-                        if entry.name.localizedCaseInsensitiveContains(query) { matches.append(entry) }
-                        if entry.isDirectory && !entry.isSymbolicLink { pending.append(url) }
+                        // Keep the navigation path when the search root itself is a symlink.
+                        let displayed = directory.appendingPathComponent(String(url.path.dropFirst(prefix.count)))
+                        matches.append(FileEntry(url: displayed, name: entry.name, isDirectory: entry.isDirectory,
+                            isSymbolicLink: entry.isSymbolicLink, size: entry.size, modified: entry.modified,
+                            kind: entry.kind, isHidden: entry.isHidden))
+                    } catch {
+                        try checkCancellation()
+                        skipped += 1
                     }
                 }
                 try checkCancellation()
-                return FileSearchResult(entries: matches, skippedCount: skipped)
+                return FileSearchResult(entries: matches, skippedCount: skipped,
+                    isTruncated: hits.count > FSearchClient.resultLimit,
+                    isIndexing: (response.indexing ?? 0) > 0 || response.complete == false, limitedAccess: response.limitedAccess)
             }
         } onCancel: {
             cancellation.cancel()

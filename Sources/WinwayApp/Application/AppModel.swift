@@ -117,7 +117,7 @@ final class AppModel {
         snapshot.isSearching = active.isSearching
         snapshot.errorMessage = active.error
         if busy { snapshot.statusMessage = status }
-        else if active.isSearching { snapshot.statusMessage = "正在搜索当前目录及子文件夹…" }
+        else if active.isSearching { snapshot.statusMessage = "正在查询文件索引，首次搜索可能需要建立索引…" }
         else if let message = active.searchMessage {
             snapshot.statusMessage = [status, message].compactMap { $0 }.joined(separator: " · ")
         } else { snapshot.statusMessage = status }
@@ -214,9 +214,12 @@ final class AppModel {
                 searchJobs.removeValue(forKey: id)
                 tabs[current].isSearching = false
                 tabs[current].searchEntries = result.entries
-                tabs[current].searchMessage = result.skippedCount > 0
-                    ? "搜索完成，已跳过 \(result.skippedCount) 个无法读取的项目"
-                    : "搜索完成（含子文件夹）"
+                var message = "索引搜索完成（含子文件夹）"
+                if result.isTruncated { message += "，仅显示前 10,000 个候选中的可见项目，请缩小范围" }
+                if result.limitedAccess { message += "，部分受保护目录尚未索引" }
+                if result.isIndexing { message += "，内容索引仍在更新，可稍后刷新" }
+                if result.skippedCount > 0 { message += "，已跳过 \(result.skippedCount) 个失效或无法读取的项目" }
+                tabs[current].searchMessage = message
                 if let select, let entry = result.entries.first(where: { $0.url.standardizedFileURL == select.standardizedFileURL }) {
                     tabs[current].selection = [entry.url]
                 }

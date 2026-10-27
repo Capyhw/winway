@@ -11,6 +11,16 @@ final class FileSystemTests: @unchecked Sendable {
     }
     private func write(_ text: String, _ url: URL) throws { try Data(text.utf8).write(to: url) }
 
+    // A protocol fixture keeps core tests deterministic and independent of the user's disk index.
+    private func indexedService(in root: URL, paths: [URL]) throws -> LocalFileService {
+        let response = root.appendingPathComponent("response.json")
+        let executable = root.appendingPathComponent("fake-fsearch")
+        try JSONSerialization.data(withJSONObject: ["ok": true, "hits": paths.map { ["path": $0.path] }]).write(to: response)
+        try write("#!/bin/sh\nIFS= read -r request\n/bin/cat '\(response.path)'\nprintf '\\n'\n", executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        return LocalFileService(searchClient: FSearchClient(executableURL: executable))
+    }
+
     @Test func testListingUsesLinkMetadataAndIncludesBrokenLinks() async throws {
         let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
         try write("你好", root.appendingPathComponent("中文.txt"))
@@ -37,15 +47,16 @@ final class FileSystemTests: @unchecked Sendable {
         try write("direct", direct); try write("nested", nested)
         try write("Report only in file contents", deep.appendingPathComponent("unrelated.txt"))
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let service = LocalFileService()
+        let service = try indexedService(in: root, paths: [direct, nested, folder])
         let result = try await service.searchDirectory(root, query: "rEpOrT")
         #expect(Set(result.entries.map { $0.url.standardizedFileURL.path }) == Set([direct.path, nested.path, folder.path]))
         #expect(result.skippedCount == 0)
         #expect(result.entries.first { $0.url.standardizedFileURL == nested.standardizedFileURL }?.location(relativeTo: root) == "unmatched/another/level")
         #expect(result.entries.first { $0.url.standardizedFileURL == direct.standardizedFileURL }?.location(relativeTo: root) == "当前目录")
         let listing = try await service.listDirectory(root)
-        #expect(listing.count == 2)
-        let empty = try await service.searchDirectory(root, query: "no-match")
+        #expect(listing.filter { !["response.json", "fake-fsearch"].contains($0.name) }.count == 2)
+        let emptyService = try indexedService(in: root, paths: [])
+        let empty = try await emptyService.searchDirectory(root, query: "no-match")
         #expect(empty.entries.isEmpty)
     }
 
@@ -60,7 +71,11 @@ final class FileSystemTests: @unchecked Sendable {
         try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("outside").path, withDestinationPath: external.path)
         try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("cycle").path, withDestinationPath: root.path)
         try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("needle-link").path, withDestinationPath: "missing")
-        let service = LocalFileService()
+        let service = try indexedService(in: root, paths: [
+            hidden.appendingPathComponent("needle.txt"), root.appendingPathComponent(".needle"),
+            root.appendingPathComponent("needle-link"), root.appendingPathComponent("outside/needle.txt"),
+            external.appendingPathComponent("needle.txt")
+        ])
         let visible = try await service.searchDirectory(root, query: "needle")
         #expect(visible.entries.map(\.name) == ["needle-link"])
         #expect(visible.entries.first?.isSymbolicLink == true)
@@ -69,7 +84,7 @@ final class FileSystemTests: @unchecked Sendable {
         #expect(all.entries.count == 3)
     }
 
-    @Test func testSearchReportsUnreadableChildrenAndFailsForInvalidRoot() async throws {
+    @Test func testIndexedSearchSkipsStaleHitsAndFailsForInvalidRoot() async throws {
         let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
         let locked = root.appendingPathComponent("locked")
         try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
@@ -77,7 +92,7 @@ final class FileSystemTests: @unchecked Sendable {
         try write("inaccessible", locked.appendingPathComponent("needle.txt"))
         #expect(chmod(locked.path, 0o000) == 0)
         defer { _ = chmod(locked.path, 0o700) }
-        let service = LocalFileService()
+        let service = try indexedService(in: root, paths: [root.appendingPathComponent("needle.txt"), root.appendingPathComponent("deleted.txt")])
         let result = try await service.searchDirectory(root, query: "needle")
         #expect(result.entries.count == 1)
         #expect(result.skippedCount == 1)
