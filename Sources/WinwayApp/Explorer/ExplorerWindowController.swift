@@ -745,7 +745,7 @@ extension ExplorerWindowController {
             info.frame = NSRect(x: 16,y: 52,width: 266,height: 22); detailBody.addSubview(info)
             if chosen.count > 1 {
                 let total = chosen.filter { !$0.isDirectory }.reduce(Int64(0)) { $0+$1.size }
-                let size = ExplorerStyle.label("文件总大小：\(ByteCountFormatter.string(fromByteCount: total,countStyle: .file))",secondary: true)
+                let size = ExplorerStyle.label("文件总大小：\(ExplorerStyle.size(bytes: total))",secondary: true)
                 size.frame = NSRect(x: 16,y: 86,width: 266,height: 22); detailBody.addSubview(size)
             }
             return

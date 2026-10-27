@@ -69,7 +69,10 @@ enum ExplorerStyle {
         return image(icon, size: size)
     }
     static func size(_ entry: FileEntry) -> String {
-        entry.isDirectory ? "—" : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file)
+        entry.isDirectory ? "—" : size(bytes: entry.size)
+    }
+    static func size(bytes: Int64) -> String {
+        bytes == 0 ? "0 KB" : ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 
