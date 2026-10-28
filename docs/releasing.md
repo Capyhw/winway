@@ -23,7 +23,7 @@ git push origin v0.1.0
 
 工作流分别在 `macos-15`（Apple Silicon）和 `macos-15-intel`（Intel）上使用 Xcode 26.3 原生构建，执行核心测试、打包资源校验、签名校验和标签/UI 组件和真实 FSearch 搜索回归。两套构建均通过后才发布 Release，并附自动生成的变更说明及签名状态说明。
 
-应用包包含 `Contents/Helpers/fsearch` 和 MIT 许可证，辅助程序先独立签名，再签名应用。Apple Silicon 使用 v0.2.1 官方发布包和固定 SHA-256；Intel 使用同一版本的固定提交与 `Cargo.lock` 本机编译，需要 Rust 1.92 或更新版本。具体版本固定在 `scripts/prepare-fsearch.sh`；更新时同步验证 JSON 协议与权限跳过目录列表。
+应用包包含 `Contents/Helpers/fsearch` 和 MIT 许可证，辅助程序先独立签名，再签名应用。Apple Silicon 使用 v0.2.1 官方发布包和固定 SHA-256；Intel 直接使用仓库内 `ThirdParty/FSearch/bin/0.2.1/x86_64/fsearch`，每次打包先校验 SHA-256 和架构，无需安装 Rust 或重新编译 FSearch。该程序来自已通过回归的 Winway v0.2.5 Intel 构建，来源、固定源码提交及更新方式见 [FSearch 说明](../ThirdParty/FSearch/README.md)。具体版本固定在 `scripts/prepare-fsearch.sh`；更新时同步验证 JSON 协议与权限跳过目录列表。
 
 每个架构生成三个文件：
 
