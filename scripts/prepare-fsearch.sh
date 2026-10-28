@@ -31,5 +31,5 @@ if [[ ! -x "$destination/fsearch" ]]; then
   fi
   chmod +x "$destination/fsearch"
 fi
-lipo -verify_arch "$architecture" "$destination/fsearch"
+lipo "$destination/fsearch" -verify_arch "$architecture"
 printf '%s\n' "$destination/fsearch"
