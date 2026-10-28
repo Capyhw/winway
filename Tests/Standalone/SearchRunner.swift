@@ -25,12 +25,27 @@ struct SearchRunner {
         try Data("nested".utf8).write(to: nested)
         let model = AppModel(directory: root, settingsURL: root.appendingPathComponent("keyboard.json"))
         model.controller = ExplorerWindowController { [weak model] in model?.handle($0) }
+        func waitForIndexedResults(_ message: String, refresh: () async -> Void,
+                                   matches: () -> Bool) async throws {
+            let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+            repeat {
+                await refresh()
+                try await waitUntil(message) { !model.active.isLoading && !model.active.isSearching }
+                precondition(model.active.error == nil, model.active.error ?? "Search failed")
+                if matches() { return }
+                precondition(ContinuousClock.now < deadline,
+                    "\(message): index did not converge; results=\(model.active.visibleEntries.map(\.name)); status=\(model.active.searchMessage ?? "none")")
+                try await Task.sleep(for: .milliseconds(100))
+            } while true
+        }
         model.refresh()
         try await waitUntil("Initial directory load") { !model.active.isLoading }
         model.handle(.filter("报告"))
         precondition(model.active.isSearching)
-        try await waitUntil("Recursive search") { !model.active.isSearching }
-        precondition(model.active.visibleEntries.count == 2)
+        // New fixtures and renamed paths become visible after FSEvents indexing.
+        try await waitForIndexedResults("Initial indexed search", refresh: { model.refresh() }) {
+            model.active.visibleEntries.count == 2
+        }
         precondition(model.active.entries.count == 2, "Direct directory listing must stay separate")
         let table = model.controller.fileTable
         let locationIndex = table.column(withIdentifier: NSUserInterfaceItemIdentifier("location"))
@@ -76,9 +91,13 @@ struct SearchRunner {
         print("PASS: search cancellation and refresh retry")
 
         let renamed = try await model.service.rename(nested, to: "新报告.txt")
-        await model.reloadAfterWrite(directory: deep, select: renamed)
-        try await waitUntil("Nested write refresh") { !model.active.isSearching }
-        precondition(model.active.visibleEntries.contains { $0.name == "新报告.txt" })
+        // The real engine updates its index asynchronously through FSEvents.
+        // A completed query can still reflect the state before the rename.
+        try await waitForIndexedResults("Nested write refresh", refresh: {
+            await model.reloadAfterWrite(directory: deep, select: renamed)
+        }) {
+            model.active.visibleEntries.contains { $0.name == "新报告.txt" }
+        }
         precondition(!model.active.visibleEntries.contains { $0.url.standardizedFileURL == nested.standardizedFileURL })
         precondition(model.selected.count == 1 && model.selected.first?.name == "新报告.txt")
         print("PASS: nested rename refreshes ancestor search and selects the renamed result")
