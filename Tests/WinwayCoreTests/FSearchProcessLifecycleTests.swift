@@ -8,16 +8,16 @@ struct FSearchProcessLifecycleTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("winway-search-exit-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let helper = root.appendingPathComponent("fsearch")
-        try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: helper.path)
-        // A copied Apple platform binary can be killed by macOS before it runs.
-        // Give the fixture its own ad-hoc signature, like the bundled helper.
-        let signer = Process()
-        signer.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        signer.arguments = ["--force", "--sign", "-", helper.path]
-        signer.standardError = FileHandle.nullDevice
-        try signer.run()
-        signer.waitUntilExit()
-        try #require(signer.terminationStatus == 0)
+        // Build a plain helper: copied Apple platform executables may be killed
+        // at launch on older macOS runners even after ad-hoc re-signing.
+        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Fixtures/FSearchLifecycleHelper.c")
+        let compiler = Process()
+        compiler.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        compiler.arguments = ["clang", source.path, "-o", helper.path]
+        try compiler.run()
+        compiler.waitUntilExit()
+        try #require(compiler.terminationStatus == 0)
         return (root, helper, FSearchProcessLifecycle(helperURL: helper))
     }
 
