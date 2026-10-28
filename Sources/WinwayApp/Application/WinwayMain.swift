@@ -4,6 +4,10 @@ import WinwayCore
 @main
 struct WinwayMain {
     @MainActor static func main() {
+        if CommandLine.arguments.contains("--check-disk-access") {
+            if let data = try? JSONEncoder().encode(FullDiskAccess.current()) { FileHandle.standardOutput.write(data) }
+            return
+        }
         if CommandLine.arguments.contains("--check-resources") {
             let bundle = ExplorerStyle.resourceBundle
             let appRoot = Bundle.main.bundleURL.resolvingSymlinksInPath().path + "/"
@@ -43,6 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApp.activate(ignoringOtherApps: true)
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationWillTerminate(_ notification: Notification) {
+        model?.shutdownSearch()
+    }
     func configureMenus() {
         let main = NSMenu()
         let app = NSMenu(title: "Winway")
@@ -117,6 +124,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return model.enabledCommands.contains(command)
     }
     @objc func about() {
-        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Winway", .applicationVersion: "0.1.0", .credits: NSAttributedString(string: "macOS 原生文件管理器 · Windows 11 交互")])
+        model.showSettings(page: .about)
     }
 }

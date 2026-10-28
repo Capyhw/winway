@@ -7,6 +7,7 @@ struct FSearchClient: Sendable {
     static let resultLimit = 10_000
     var executableURL: URL?
     var timeout: TimeInterval = 120
+    var lifecycle = FSearchProcessLifecycle.shared
 
     struct Response: Decodable, Sendable {
         struct Hit: Decodable, Sendable { let path: String }
@@ -17,11 +18,25 @@ struct FSearchClient: Sendable {
         let complete: Bool?
         let indexing: Int?
         let fullDiskAccess: Bool?
+        let entries: Int?
+        let contentPending: Int?
         var limitedAccess = false
         enum CodingKeys: String, CodingKey {
             case ok, error, hits, files, complete, indexing
             case fullDiskAccess = "full_disk_access"
+            case entries
+            case contentPending = "content_pending"
         }
+    }
+
+    func status(cancellation: FileOperationCancellation = .init()) throws -> SearchIndexStatus {
+        let response = try exchange(["op": "status"], cancellation: cancellation)
+        if !response.ok, let error = response.error, error.hasPrefix("indexing:") {
+            return SearchIndexStatus(isBuilding: true, fullDiskAccess: nil, entries: nil, pendingContent: nil)
+        }
+        guard response.ok else { throw FileServiceError(.io, response.error ?? "无法读取搜索索引状态。") }
+        return SearchIndexStatus(isBuilding: false, fullDiskAccess: response.fullDiskAccess,
+                                 entries: response.entries, pendingContent: response.contentPending)
     }
 
     func search(directory: URL, query: String, cancellation: FileOperationCancellation) throws -> Response {
@@ -76,18 +91,13 @@ struct FSearchClient: Sendable {
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
         try checkCancellation(cancellation)
-        try process.run()
-        // Never kill the shared daemon; only dispose of this request's client.
+        try lifecycle.start(process, cancellation: cancellation)
+        // Query cancellation only disposes of this client. App shutdown also
+        // stops the bundled daemon through the shared lifecycle.
         defer {
             try? input.fileHandleForWriting.close()
             try? output.fileHandleForReading.close()
-            if process.isRunning {
-                process.terminate()
-                let deadline = Date().addingTimeInterval(0.5)
-                while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
-                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-            }
-            process.waitUntilExit()
+            lifecycle.finish(process)
         }
         _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         try input.fileHandleForWriting.write(contentsOf: request)
@@ -110,6 +120,7 @@ struct FSearchClient: Sendable {
             if ready == 0 { continue }
             let count = read(descriptor, &buffer, buffer.count)
             guard count > 0 else {
+                try checkCancellation(cancellation)
                 if count < 0 && errno == EINTR { continue }
                 throw FileServiceError(.io, "FSearch 意外退出或未返回完整结果，请刷新重试。")
             }

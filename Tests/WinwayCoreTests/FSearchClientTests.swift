@@ -70,6 +70,26 @@ struct FSearchClientTests {
         #expect(start.duration(to: .now) < .seconds(3))
     }
 
+    @Test func applicationShutdownInterruptsAnInFlightSearch() async throws {
+        let (root, initial) = try fixture("exec /bin/sleep 30\n")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let lifecycle = FSearchProcessLifecycle(helperURL: root.appendingPathComponent("fsearch"))
+        var client = initial
+        client.lifecycle = lifecycle
+        let service = LocalFileService(searchClient: client)
+        let task = Task { try await service.searchDirectory(root, query: "needle") }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !FileManager.default.fileExists(atPath: root.appendingPathComponent("request.json").path),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        lifecycle.shutdown()
+        do { _ = try await task.value; Issue.record("Shutdown search returned a result") }
+        catch { #expect((error as? FileServiceError)?.code == .cancelled) }
+        do { _ = try await service.searchDirectory(root, query: "another"); Issue.record("Search restarted after shutdown") }
+        catch { #expect((error as? FileServiceError)?.code == .cancelled) }
+    }
+
     @Test func contentResultsAndTruncationAreReported() async throws {
         let (root, client) = try fixture("/bin/cat \"$(dirname \"$0\")/response.json\"\nprintf '\\n'\n")
         defer { try? FileManager.default.removeItem(at: root) }

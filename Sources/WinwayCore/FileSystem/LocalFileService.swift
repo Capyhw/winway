@@ -13,6 +13,27 @@ public final class LocalFileService: FileServing, @unchecked Sendable {
     public init() { searchClient = FSearchClient() }
     init(searchClient: FSearchClient) { self.searchClient = searchClient }
 
+    /// Call once when the app exits, after cancelling its pending search jobs.
+    public static func shutdownSearch() { FSearchProcessLifecycle.shared.shutdown() }
+
+    public func prepareSearchIndex(rebuild: Bool = false) async throws {
+        try await perform(on: searches, context: FileManager.default.homeDirectoryForCurrentUser) {
+            try self.searchClient.lifecycle.restart { try SearchIndexStore().prepare(rebuild: rebuild) }
+        }
+    }
+
+    public func searchIndexStatus(cancellation: FileOperationCancellation = .init()) async throws -> SearchIndexStatus {
+        try await perform(on: searches, context: FileManager.default.homeDirectoryForCurrentUser) {
+            try self.searchClient.status(cancellation: cancellation)
+        }
+    }
+
+    public func stopSearchIndex() async throws {
+        try await perform(on: searches, context: FileManager.default.homeDirectoryForCurrentUser) {
+            try self.searchClient.lifecycle.restart {}
+        }
+    }
+
     public static func resolvePath(_ path: String) -> URL {
         URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
     }

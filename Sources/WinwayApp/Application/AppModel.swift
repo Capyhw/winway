@@ -19,6 +19,8 @@ final class AppModel {
     var status: String?
     var controller: ExplorerWindowController!
     var settingsController: SettingsWindowController?
+    var onboardingController: PermissionOnboardingController?
+    lazy var searchSettings = SearchSettingsStore(service: service)
     var subscriptions = Set<AnyCancellable>()
     var keyMonitor: Any?
     var locations: [ExplorerLocation] = []
@@ -41,6 +43,29 @@ final class AppModel {
     }
 
     func start() {
+        searchSettings.willRestart = { [weak self] in
+            guard let self else { return }
+            for id in Array(searchJobs.keys) { cancelSearch(id) }
+            for index in tabs.indices where !tabs[index].filter.isEmpty { tabs[index].searchEntries = [] }
+        }
+        searchSettings.didBecomeReady = { [weak self] in
+            guard let self else { return }
+            for tab in tabs where !tab.filter.isEmpty { startSearch(tab.id) }
+        }
+        searchSettings.$indexState.sink { [weak self] _ in
+            Task { @MainActor in self?.render() }
+        }.store(in: &subscriptions)
+        searchSettings.$showOnboarding.removeDuplicates().sink { [weak self] show in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if show {
+                    if self.onboardingController == nil { self.onboardingController = PermissionOnboardingController(store: self.searchSettings) }
+                    self.onboardingController?.showWindow(nil); self.onboardingController?.window?.makeKeyAndOrderFront(nil)
+                } else {
+                    self.onboardingController?.close(); self.onboardingController = nil
+                }
+            }
+        }.store(in: &subscriptions)
         controller = ExplorerWindowController { [weak self] action in self?.handle(action) }
         keyboard.$configuration.sink { [weak self] _ in
             Task { @MainActor in self?.render() }
@@ -63,6 +88,7 @@ final class AppModel {
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         refresh()
+        searchSettings.startMonitoring()
     }
 
     func loadLocations() {
@@ -117,6 +143,9 @@ final class AppModel {
         snapshot.isSearching = active.isSearching
         snapshot.errorMessage = active.error
         if busy { snapshot.statusMessage = status }
+        else if searchSettings.isMonitoring && !searchSettings.canSearch && !active.filter.isEmpty {
+            snapshot.statusMessage = searchSettings.indexMessage + " 可在设置 → 权限中查看。"
+        }
         else if active.isSearching { snapshot.statusMessage = "正在查询文件索引，首次搜索可能需要建立索引…" }
         else if let message = active.searchMessage {
             snapshot.statusMessage = [status, message].compactMap { $0 }.joined(separator: " · ")
@@ -183,6 +212,12 @@ final class AppModel {
         if let index = tabs.firstIndex(where: { $0.id == id }) { tabs[index].isSearching = false }
     }
 
+    func shutdownSearch() {
+        searchSettings.stop()
+        for id in Array(searchJobs.keys) { cancelSearch(id) }
+        LocalFileService.shutdownSearch()
+    }
+
     func setSearch(_ text: String) {
         let index = activeIndex
         cancelSearch(activeID)
@@ -200,6 +235,12 @@ final class AppModel {
         let query = tabs[index].filter
         guard !query.isEmpty else {
             tabs[index].searchEntries = nil; tabs[index].searchMessage = nil
+            return
+        }
+        guard !searchSettings.isMonitoring || searchSettings.canSearch else {
+            tabs[index].searchEntries = []
+            tabs[index].searchMessage = searchSettings.indexMessage + " 可在设置 → 权限中查看。"
+            render()
             return
         }
         let directory = tabs[index].navigation.directory
@@ -300,13 +341,18 @@ final class AppModel {
         case .focusSearch: controller.focusSearch()
         case .refresh: refresh(); loadLocations()
         case .settings:
-            if settingsController == nil { settingsController = SettingsWindowController(store: keyboard) }
-            settingsController?.showWindow(nil); settingsController?.window?.makeKeyAndOrderFront(nil)
+            showSettings()
         case .toggleHidden:
             showHidden.toggle()
             for tab in tabs { navigate(tab.navigation.directory, refresh: true, tabID: tab.id) }
         case .toggleDetails: showDetails.toggle(); render()
         }
+    }
+
+    func showSettings(page: SettingsPage? = nil) {
+        if settingsController == nil { settingsController = SettingsWindowController(store: keyboard, search: searchSettings) }
+        if let page { settingsController?.showPage(page) }
+        else { settingsController?.showWindow(nil) }
     }
 
     private func openNewTab(at directory: URL) {

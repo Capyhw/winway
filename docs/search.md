@@ -2,7 +2,11 @@
 
 Winway 使用 [noahdunnagan/fsearch](https://github.com/noahdunnagan/fsearch) v0.2.1（提交 `88e63fdf850cf7749deae8198b187accd21f8ba5`，MIT）。这是面向 macOS 的 Rust 搜索引擎，与 cboxdoerfer 的 GTK 应用不同。
 
-首次搜索会启动 FSearch 共享后台服务并建立磁盘索引。后续查询使用索引，由 FSEvents 更新文件变化；不再为每次输入重新递归遍历目录。Winway 保留 250ms 输入防抖，结果按文件列表选择的规则排序。首次索引耗时取决于磁盘和文件数，后台服务在窗口关闭后继续运行，不注册登录项。
+首次打开会引导开启完全磁盘访问权限，也可以选择稍后设置并继续浏览文件。未确认权限生效前，Winway 不启动索引或索引搜索。应用启动、回到前台和点击「重新检测」都会检查权限；检测到已开启后自动重启 FSearch 并加载或建立索引。文件索引就绪且 FSearch 报告权限已生效后才开放搜索，内容索引可以继续在后台更新。
+
+后续查询使用索引，由 FSEvents 更新文件变化；不再为每次输入重新递归遍历目录。Winway 保留 250ms 输入防抖，结果按文件列表选择的规则排序。首次索引耗时取决于磁盘和文件数，不注册登录项。正常退出 Winway（包括关闭最后一个窗口）时，会先取消搜索、结束查询进程，再关闭当前应用包内的 FSearch 后台进程；下次授权检查通过后重新启动服务，复用已保存的索引。取消单次搜索不会关闭后台服务。
+
+退出清理只匹配当前 `Winway.app/Contents/Helpers/fsearch` 的完整程序路径，并校验进程身份；独立安装或其他应用包中的 FSearch 不会被关闭。如果其他工具也连接到了 Winway 内置辅助程序提供的共享服务，该服务会随 Winway 退出。强制结束或应用崩溃不保证执行退出清理。
 
 ## 查询
 
@@ -21,7 +25,11 @@ Winway 使用 [noahdunnagan/fsearch](https://github.com/noahdunnagan/fsearch) v0
 
 索引保存在 `~/Library/Application Support/FSearch/`，与独立安装的同版本 FSearch 共享。没有完全磁盘访问权限时，上游主动跳过桌面、文档、下载、部分 Library/媒体目录及 `/Volumes`。Winway 对受保护目录显示权限提示，对包含这些目录的搜索显示覆盖不完整提示。普通目录也可能因权限或索引更新延迟缺少结果；刷新会重新查询当前索引。
 
-需要搜索受保护目录时，在 macOS「系统设置 → 隐私与安全性 → 完全磁盘访问权限」中授权 Winway，以及实际提供索引的 FSearch 辅助程序。打包位置为 `Winway.app/Contents/Helpers/fsearch`；如果已运行独立安装的 FSearch，授权其对应程序。随后退出旧的 FSearch 后台进程，再重新搜索，使它重新检查权限。重建、重新签名或升级后可能需要重新授权。不要删除索引来代替授权。
+需要搜索受保护目录时，先在 macOS「系统设置 → 隐私与安全性 → 完全磁盘访问权限」中授权 Winway。返回软件后自动检测；若仍未生效，正常退出并重新打开 Winway。搜索服务仍提示权限不足时，可再授权实际提供索引的 FSearch 辅助程序，打包位置为 `Winway.app/Contents/Helpers/fsearch`。如果已运行独立安装的 FSearch，需授权其对应程序并单独重启该服务。重建、重新签名或升级后可能需要重新授权。不要删除索引来代替授权。
+
+设置 → 权限显示 Winway 的访问检测结果，开关会打开系统权限设置，不会在应用内伪造授权状态。由 Winway 启动的辅助程序通常继承应用的权限，但旧服务或独立启动的服务可能具有不同的权限归属，因此还会核验 FSearch 的状态。macOS 没有公开的完全磁盘访问状态 API；应用在新子进程中尝试打开受保护的系统 TCC 文件，不读取数据库内容。检测路径与固定版本 FSearch 相同，系统文件权限或管理策略仍可能影响结果，界面不会把检测失败当作授权成功。
+
+「重新建立索引」要求权限已开启，会取消查询、停止内置服务，并锁定 `socket.lock` 与 `daemon.lock`，然后清理 `index.bin`、`skipped` 和 `content` 这些生成缓存，再启动索引。文件、访问历史和日志保持不变。若独立 FSearch 占用任一锁则拒绝重建。授权后的普通重启也会让上游重扫此前记录为跳过的目录，完整重建用于手动修复仍然遗漏的结果。
 
 上游全盘遍历不会跨越普通挂载点，外接卷的覆盖不能保证。内容索引也不是所有文件的全文数据库：默认文本上限为 1 MB，Git 仓库内为 10 MB，并排除部分忽略文件、锁文件、构建输出和大 JSON 等。内容搜索进行中或结果不完整时会提示刷新。没有授予权限和未覆盖的目录不能视为“磁盘上没有这个文件”。
 
@@ -35,6 +43,8 @@ Winway 使用 [noahdunnagan/fsearch](https://github.com/noahdunnagan/fsearch) v0
 ./scripts/test.sh
 ./scripts/build-app.sh debug
 ./scripts/test-search.sh
+./scripts/test-search-lifecycle.sh
+./scripts/test-settings.sh
 ./scripts/test-bundle.sh dist/Winway.app
 ```
 
