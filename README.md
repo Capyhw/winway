@@ -1,103 +1,129 @@
 # Winway
 
-**把 Windows 文件管理的肌肉记忆带到 Mac。**
+**换了 Mac，习惯不用换。**
 
-Winway 是一款面向 Windows 迁移用户的原生 macOS 文件管理器，采用熟悉的 Windows 11 资源管理器布局，让打开、改名、复制、移动文件这些每天重复的操作，继续按习惯完成。
+Winway 是一款面向 Windows 迁移用户的原生 macOS 文件管理器。熟悉的资源管理器布局、Enter 打开、F2 改名、Ctrl+X / V 移动文件，再加上多标签拖拽、索引搜索和 Mac 的原生文件服务，让每天的文件操作继续顺手。
 
-换了 Mac，常见的不适往往发生在小动作上：按 Enter 想打开文件，却进入了改名；想剪切再粘贴，需要重新记一组移动快捷键；拿到目录路径，习惯先点地址栏。Winway 的目的，就是减少这些反复打断操作的时刻。
+[项目官网](https://capyhw.github.io/winway/) · [下载最新版](https://github.com/Capyhw/winway/releases/latest) · [使用须知](#使用须知) · [反馈问题](https://github.com/Capyhw/winway/issues)
 
-[下载试用](#下载试用) · [操作截图](#日常操作) · [快捷键说明](docs/keyboard.md) · [反馈问题](https://github.com/Capyhw/winway/issues)
+![Winway 最新主界面：多标签目录、面包屑路径、文件列表与文本预览](docs/screenshots/2026-10-28/overview.png)
 
-## 为什么用 Winway
+## 下载与安装
 
-- **常用按键保持熟悉**：默认 Enter 打开、F2 改名、Ctrl+C / X / V 复制、剪切和粘贴，支持鼠标前进、后退侧键。
-- **整理文件少切换窗口**：多标签并排打开目录，跨标签移动文件；每个标签保留自己的浏览历史、排序、选择和滚动位置。
-- **找文件、看内容更直接**：地址栏输入路径，使用 FSearch 索引搜索当前目录及子文件夹，支持模糊名称和内容查询，侧栏查看图片、文本预览和文件信息。
-- **习惯可以自己决定**：Windows、macOS 两套快捷键预设，可逐项修改，分别保存。
-- **与 Mac 的文件系统配合**：使用默认应用打开文件，也可通过右键「打开方式」选择其他应用；支持系统文件服务，删除进入系统废纸篓，遇到重名可跳过或保留两者。
+在 [GitHub Releases](https://github.com/Capyhw/winway/releases/latest) 下载最新版本，无需登录即可下载安装包。最低编译目标为 **macOS 13**，提供两种架构：
 
-这些快捷键在 Winway 内生效，不会修改其他应用的按键行为。
+| 你的 Mac | 选择安装包 |
+| --- | --- |
+| Apple Silicon（M 系列芯片） | `Winway-<版本>-macos-arm64.dmg` |
+| Intel 处理器 | `Winway-<版本>-macos-x86_64.dmg` |
 
-## 日常操作
+在 ** → 关于本机** 查看芯片。打开 DMG，将 Winway 拖入「应用程序」；也可以下载 ZIP，解压后移动 `Winway.app`。每个架构同时提供 `.sha256` 校验文件。
 
-以下均为 Winway 实际运行截图，使用专门准备的示例文件。
+当前安装包使用 ad-hoc 签名，**尚未经过 Apple Developer ID 签名与公证**，首次打开可能出现系统安全提示。请先确认下载来自本项目 Releases，再按 macOS「系统设置 → 隐私与安全性」提示处理。不同 macOS 版本的兼容性仍需更多实机反馈。
 
-### 1. Enter 打开，F2 重命名
+## 用得顺手的操作
 
-在 Finder 中，Return 用于重命名，打开文件通常使用 ⌘O 或 ⌘↓。如果你习惯了 Windows 的按法，这两个高频动作最容易按错。Winway 默认用 Enter 打开文件或进入文件夹，用 F2 开始行内重命名。
+### 熟悉的按键，也能自己调整
 
-下图是选中「项目计划.txt」后按 F2 的状态：直接编辑文件名，无需打开额外对话框。
+默认使用 Windows 预设：Enter 打开文件或进入文件夹，F2 行内改名，Ctrl+C / X / V 复制、剪切、粘贴。支持键盘选择、鼠标框选、多选和鼠标前进／后退侧键。
 
-![按 F2 后，项目计划.txt 在文件列表中进入行内重命名](docs/screenshots/rename-f2.jpg)
+在设置中切换 Windows / macOS 预设，或单独修改、清除、恢复某个快捷键。两套自定义配置独立保存；录入时检查冲突，菜单提示同步更新。快捷键仅在 Winway 内生效，不改变其他应用。
 
-### 2. Ctrl+X → Ctrl+V，跨标签移动文件
+![当前版本的键盘设置，Windows 与 macOS 预设及逐项自定义入口](docs/screenshots/2026-10-28/keyboard.png)
 
-在 Finder 中，移动已复制的文件使用 ⌘C → ⌥⌘V。Winway 保留剪切、粘贴的操作顺序：在来源标签按 Ctrl+X，切到目标目录后按 Ctrl+V。
+### 多标签与拖拽，少切换几个窗口
 
-下图中，「项目计划.txt」已从「项目资料」移入「交付文件」，底部显示操作成功。可以同时保留两个目录标签，继续整理下一批文件。标签右键菜单支持关闭当前、其余、左侧或右侧标签。
+- 并排打开多个目录，拖动标签调整顺序；每个标签独立保留浏览历史、排序、选择和滚动位置。
+- 右键标签可关闭当前、其余、左侧或右侧标签。
+- 拖动一个或多个文件／文件夹，放入文件列表中的文件夹或当前目录空白处即可移动。
+- 拖着文件悬停到另一标签约 0.6 秒，自动切换到该目录，再继续拖放。目标位置会高亮；不能移动到原位置、文件夹自身或其子目录。
+- 也可按 Ctrl+X，切换标签，再按 Ctrl+V；批量操作在状态栏报告结果。
 
-![项目计划.txt 跨标签移动到交付文件，底部显示成功 1](docs/screenshots/move-between-tabs.jpg)
+![当前版本跨标签剪切粘贴：项目计划.txt 已移入交付文件，底部显示成功 1](docs/screenshots/2026-10-28/move-between-tabs.png)
 
-### 3. Ctrl+L，直接输入目录路径
+### FSearch 索引搜索，包含子文件夹
 
-拿到一个目录路径时，按 Ctrl+L 即可在地址栏编辑，输入或粘贴路径后按 Enter 跳转。支持绝对路径和 `~/` 路径；也可以使用面包屑逐级浏览。
+按 Ctrl+F，在当前目录及所有子文件夹中搜索。Winway 内置 FSearch 辅助程序，使用索引查询，结果显示文件所在位置；无需另外安装搜索工具。
 
-下图展示在地址栏输入「项目资料/设计稿」目录的状态。查找文件时，Ctrl+F 可搜索当前目录及所有子文件夹，结果会显示文件所在位置。
+| 查询示例 | 用途 |
+| --- | --- |
+| `mian.swift` | 模糊名称匹配，允许一定程度的拼写错误 |
+| `ext:pdf report` | 按扩展名筛选并匹配名称 |
+| `type:image` | 查找图片 |
+| `grep:invoice` | 查找包含指定文本的文件 |
 
-![按 Ctrl+L 后在地址栏直接输入设计稿目录路径](docs/screenshots/path-entry.jpg)
+首次搜索需要建立索引，文件变化同步可能存在延迟。桌面、文档、下载等受保护目录需要相应权限；内容索引也有类型和大小限制。查看 [搜索语法、覆盖范围与权限配置](docs/search.md)。
 
-### 4. 保留熟悉的按键，也能逐步适应 Mac
+![当前版本使用 ext:txt 搜索，结果包含参考资料子文件夹中的项目需求.txt](docs/screenshots/2026-10-28/search.png)
 
-默认使用 Windows 预设，也可以切换到 macOS 预设，或只修改某一个操作的按键。两套配置独立保存，菜单提示会同步更新。
+### 路径导航与预览，少打断手上的事
 
-![键盘设置中的 Windows 与 macOS 预设，以及打开、改名、复制、剪切、粘贴的按键配置](docs/screenshots/keyboard-presets.jpg)
+面包屑逐级跳转，Ctrl+L 切换路径编辑，支持绝对路径和 `~/` 路径。后退、前进和上级目录都有快捷键，也支持鼠标侧键导航。
 
-部分键盘的 F2 需要同时按 Fn，具体取决于系统设置。上面的 Finder 按键对照可参见 [Apple 快捷键说明](https://support.apple.com/en-us/102650)与[文件重命名说明](https://support.apple.com/guide/mac-help/rename-files-folders-and-disks-on-mac-mchlp1144/mac)。
+选择文件后，右侧直接预览 PNG、JPEG 和 UTF-8 文本，同时显示类型、大小、修改时间和完整路径。多选时可查看文件总大小；零字节文件明确显示为 `0 bytes`。隐藏文件显示、排序和详情面板均可切换。
+
+### 与 Mac 的应用和文件系统配合
+
+右键菜单按用途分组，显示当前快捷键；可以使用默认应用打开文件，也可以通过「打开方式」选择其他应用。多选时，只列出能打开全部所选文件的应用。系统文件服务按当前选择和 macOS 中已启用的服务提供。
+
+同名文件可以跳过、保留两者或取消，删除进入系统废纸篓。复制和移动逐项报告结果，跨卷移动在复制成功后再删除源文件。
+
+![当前版本的分类文件右键菜单，含打开方式和 macOS 系统服务](docs/screenshots/2026-10-28/context-menu.png)
+
+以上截图均于 **2026-10-28** 使用当前源码构建的应用拍摄，内容为专门准备的示例文件。截图来源及版本记录见 [截图说明](docs/screenshots/2026-10-28/README.md)。
 
 ## 常用快捷键
 
-以下为默认 Windows 预设，`Ctrl` 指 Mac 键盘上的 **Control** 键。
+以下为默认 **Windows 预设**。`Ctrl` 指 Mac 键盘上的 **Control**，不是 Command；部分键盘需使用 Fn+F2。
 
 | 操作 | 快捷键 |
 | --- | --- |
-| 打开文件 / 进入文件夹 | Enter |
-| 重命名 | F2 |
-| 复制 / 剪切 / 粘贴 | Ctrl+C / Ctrl+X / Ctrl+V |
+| 打开文件／进入文件夹 | Enter |
+| 行内重命名 | F2 |
+| 复制／剪切／粘贴 | Ctrl+C / Ctrl+X / Ctrl+V |
 | 全选 | Ctrl+A |
 | 新建文件夹 | Ctrl+Shift+N |
-| 新建 / 关闭标签 | Ctrl+T / Ctrl+W |
-| 输入路径 / 搜索 | Ctrl+L / Ctrl+F |
-| 后退 / 前进 / 上级目录 | Option+← / Option+→ / Option+↑ |
+| 新建／关闭标签 | Ctrl+T / Ctrl+W |
+| 编辑路径／搜索 | Ctrl+L / Ctrl+F |
+| 后退／前进／上级目录 | Option+← / Option+→ / Option+↑ |
 | 刷新 | F5 |
 | 移到废纸篓 | ⌫（Backspace） |
+| 显示隐藏文件 | Ctrl+Shift+. |
+| 显示详情 | Option+P |
+| 打开设置 | Ctrl+, |
 
-搜索引擎、查询示例与索引权限说明见 [FSearch 搜索](docs/search.md)。
+macOS 预设、按键录入与冲突规则见 [快捷键说明](docs/keyboard.md)。
 
-完整预设及自定义规则见[快捷键说明](docs/keyboard.md)。
+## 使用须知
 
-## 下载试用
+- **文件剪贴板**：复制、剪切在 Winway 内共享，支持跨标签；尚未与 Finder 的文件剪贴板互通。
+- **文件拖拽**：当前提供 Winway 内的文件移动，不能据此认为已支持与其他应用互拖或按修饰键切换复制。
+- **搜索覆盖**：受系统权限、索引进度、文件大小和类型限制；外接卷覆盖不能保证。结果为空不代表磁盘上不存在该文件。
+- **文件预览**：内置支持 PNG、JPEG 和 UTF-8 文本；PDF、Office 等格式可用其他应用打开。
+- **同名冲突**：不提供覆盖和目录合并；可跳过、保留两者或取消。
+- **删除与批量任务**：删除进入废纸篓，不提供永久删除；已完成的批量操作不会自动回滚。
+- **系统集成**：Finder 专属扩展菜单不在支持范围内，第三方应用的目录访问权限仍由该应用处理。
 
-目前处于早期开发阶段，尚未发布正式版本。可以在 [Release macOS 构建页面](https://github.com/Capyhw/winway/actions/workflows/release.yml)选择一次成功的运行，在 **Artifacts** 下载测试包（下载 Actions 产物需要登录 GitHub）。正式版本将通过 [Releases](https://github.com/Capyhw/winway/releases)提供。
+## 开发、文档与反馈
 
-- Apple Silicon（M 系列芯片）：选择 `arm64`。
-- Intel Mac：选择 `x86_64`。
-- 解开下载的产物后，使用其中的 DMG 或 ZIP，将 `Winway.app` 放入「应用程序」。
+Winway 使用 Swift、AppKit 与 SwiftUI，搜索集成 [FSearch](https://github.com/noahdunnagan/fsearch)。应用安装包已包含搜索辅助程序和其许可证。
 
-目标系统为 macOS 13 及以上；不同系统版本的兼容性仍在完善。目前安装包使用 ad-hoc 签名，尚未经过 Apple Developer ID 签名与公证，首次打开可能遇到系统安全提示。
+```sh
+# 核心测试
+./scripts/test.sh
 
-## 当前边界
+# 构建可运行的 macOS 应用
+./scripts/build-app.sh release
+open dist/Winway.app
+```
 
-- 复制、剪切在 Winway 内共享，支持跨标签；尚未与 Finder 的文件剪贴板互通。
-- 内置预览支持 PNG、JPEG 和 UTF-8 文本；PDF、Office 等格式可用系统默认应用打开。
-- 「打开方式」多选时只列出能打开全部所选文件的应用；「服务」由 macOS 按当前选择及已启用服务提供。Finder 专属扩展菜单不在支持范围内，第三方应用的目录授权仍由该应用处理。
-- 同名文件支持跳过、保留两者或取消，不提供覆盖和目录合并。
-- 删除进入系统废纸篓，不提供永久删除。批量操作会报告成功和失败项，已完成的操作不会自动回滚。
+构建环境、架构与依赖要求见 [本地构建与测试](docs/development.md)。
 
-## 开发与反馈
+- [快捷键与自定义规则](docs/keyboard.md)
+- [FSearch 搜索与权限](docs/search.md)
+- [文件操作与数据保护边界](docs/file-service.md)
+- [双架构 Release 自动打包](docs/releasing.md)
+- [官网与 GitHub Pages 部署](docs/website.md)
+- [历史验收记录](docs/acceptance.md)
 
-欢迎通过 [Issues](https://github.com/Capyhw/winway/issues)反馈迁移到 Mac 后最不适应的文件操作，或提交复现步骤与截图。
-
-- [本地构建与测试](docs/development.md)
-- [Release 自动打包](docs/releasing.md)
-- [文件操作行为](docs/file-service.md)
-- [验收记录与已知边界](docs/acceptance.md)
+欢迎在 [Issues](https://github.com/Capyhw/winway/issues) 反馈使用问题或最想保留的 Windows 操作习惯。报告问题时，请附上 macOS 版本、芯片类型、Winway 版本与复现步骤。

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#edf3fb">
+  <title>Winway — 把熟悉的文件管理，带到 Mac。</title>
+  <meta name="description" content="Winway 是面向 Windows 迁移用户的原生 macOS 文件管理器。熟悉的快捷键、多标签拖拽、FSearch 索引搜索，让每天的文件操作更顺手。">
+  <link rel="canonical" href="https://capyhw.github.io/winway/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="zh_CN">
+  <meta property="og:title" content="Winway — 把熟悉的文件管理，带到 Mac。">
+  <meta property="og:description" content="Enter 打开，F2 改名，Ctrl+X / V 移动。为 Windows 迁移用户打造的原生 macOS 文件管理器。">
+  <meta property="og:url" content="https://capyhw.github.io/winway/">
+  <meta property="og:image" content="https://capyhw.github.io/winway/assets/overview.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="header wrap">
+    <a class="brand" href="#" aria-label="Winway 首页"><img src="assets/icon.svg" width="34" height="34" alt="">Winway</a>
+    <nav aria-label="主导航">
+      <a href="#features">功能</a><a href="#questions">使用须知</a><a href="https://github.com/Capyhw/winway">GitHub <span aria-hidden="true">↗</span></a>
+      <a class="nav-download" href="#download">下载 Winway</a>
+    </nav>
+  </header>
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">换了 Mac，<br>习惯不用换。</h1>
+        <div class="hero-intro">
+          <p>把熟悉的文件管理，带到 Mac。<br>Winway 为 Windows 迁移用户而生，让打开、改名、<br class="desktop-break">移动文件这些小事，继续顺手。</p>
+          <a class="button button-primary" href="#download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg>下载 macOS 版</a>
+          <span class="availability">macOS 13+ · Apple Silicon 与 Intel</span>
+        </div>
+      </div>
+      <div class="app-preview">
+        <img src="assets/overview.png" width="2752" height="1640" alt="Winway 最新主窗口：并排的目录标签、面包屑导航、文件列表与右侧文本预览" fetchpriority="high">
+      </div>
+      <div class="shortcut-strip" aria-label="默认 Windows 快捷键">
+        <span><kbd>Enter ↵</kbd> 打开文件</span>
+        <span><kbd>F2</kbd> 重命名</span>
+        <span><kbd>Ctrl</kbd><span>+</span><kbd>X / V</kbd> 剪切与粘贴</span>
+        <span><kbd>Ctrl</kbd><span>+</span><kbd>L</kbd> 输入路径</span>
+      </div>
+    </section>
+
+    <section id="features" class="features wrap" aria-labelledby="features-title">
+      <div class="section-intro"><h2 id="features-title">少一点适应，<br>多一点顺手。</h2><p>保留用得顺手的操作，<br>也用好 Mac 的原生能力。</p></div>
+      <div class="feature-columns">
+        <article><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="7" width="26" height="19" rx="3"/><path d="M8 12h2m5 0h2m5 0h2M8 17h2m5 0h2m5 0h2M10 22h12"/></svg><h3>手指记得的，都还在</h3><p>Enter 打开，F2 改名，Ctrl+C / X / V 复制、剪切、粘贴。支持 Windows 与 macOS 两套预设，也能逐项自定义。</p></article>
+        <article><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="6" width="26" height="22" rx="3"/><path d="M3 13h26M13 6v7M8 20h13m-4-4 4 4-4 4"/></svg><h3>目录并排，文件随手整理</h3><p>多标签打开目录，拖动调整标签顺序。拖着文件悬停到另一标签即可切换，再放入目标目录；多选也一样。</p></article>
+        <article><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="14" cy="14" r="9"/><path d="m21 21 8 8M10 14h8m-4-4v8"/></svg><h3>不只找名字，也找内容</h3><p>FSearch 索引搜索覆盖当前目录及子文件夹。支持模糊名称、文件类型和文本内容查询，结果直接显示所在位置。</p></article>
+      </div>
+    </section>
+
+    <section class="showcase" aria-labelledby="showcase-title">
+      <div class="wrap">
+        <div class="section-intro"><h2 id="showcase-title">每天用到的细节，<br>在这里连起来。</h2><p>以下均为当前版本的实际运行截图，<br>使用专门准备的示例文件。</p></div>
+        <div class="gallery-controls" role="group" aria-label="选择功能截图">
+          <button type="button" data-view="move" aria-pressed="true" aria-controls="gallery">跨标签移动</button>
+          <button type="button" data-view="search" aria-pressed="false" aria-controls="gallery">索引搜索</button>
+          <button type="button" data-view="menu" aria-pressed="false" aria-controls="gallery">原生右键菜单</button>
+          <button type="button" data-view="keyboard" aria-pressed="false" aria-controls="gallery">自定义快捷键</button>
+        </div>
+        <figure id="gallery" class="gallery">
+          <div class="gallery-image"><img id="gallery-image" src="assets/move-between-tabs.png" width="2752" height="1640" loading="lazy" alt="项目计划.txt 已从项目资料移入交付文件，状态栏显示成功 1"></div>
+          <figcaption aria-live="polite"><strong id="gallery-title">两个目录，一个窗口。</strong><span id="gallery-description">剪切、切换标签、粘贴。也支持拖拽移动，悬停标签自动切换，每个标签保留独立的浏览状态。</span></figcaption>
+        </figure>
+        <noscript><p>更多截图：<a href="assets/search.png">索引搜索</a>、<a href="assets/context-menu.png">右键菜单</a>、<a href="assets/keyboard.png">快捷键设置</a>。</p></noscript>
+      </div>
+    </section>
+
+    <section class="details-section wrap" aria-labelledby="details-title">
+      <h2 id="details-title">熟悉的布局，原生的配合。</h2>
+      <div class="detail-grid">
+        <article><h3>路径，想点就点，想输就输</h3><p>面包屑逐级跳转，Ctrl+L 直接输入绝对路径或 ~/ 路径。鼠标侧键也能前进、后退。</p></article>
+        <article><h3>选中文件，就能先看一眼</h3><p>侧栏预览 PNG、JPEG 和 UTF-8 文本，同时查看类型、大小、修改时间和路径。多选时查看文件总大小。</p></article>
+        <article><h3>打开方式，由你决定</h3><p>使用默认应用打开，或在右键菜单选择其他应用。接入 macOS 文件服务，保留日常工作方式。</p></article>
+        <article><h3>整理时，把结果说清楚</h3><p>同名文件可跳过或保留两者，删除进入系统废纸篓。批量操作逐项报告成功、失败和跳过情况。</p></article>
+      </div>
+    </section>
+
+    <section id="download" class="download-section wrap" aria-labelledby="download-title">
+      <div class="download-heading"><img src="assets/icon.svg" alt="" width="76" height="76"><h2 id="download-title">下一次整理文件，<br>从顺手开始。</h2><p>Winway <span>@@VERSION@@</span>，适用于 macOS 13 及以上。</p></div>
+      <div class="download-options">
+        <a class="download-option" href="@@ARM64_URL@@"><span><strong>Apple Silicon</strong><small>M 系列芯片 · DMG 安装包</small></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg></a>
+        <a class="download-option" href="@@INTEL_URL@@"><span><strong>Intel Mac</strong><small>Intel 处理器 · DMG 安装包</small></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg></a>
+      </div>
+      <p class="download-help">在  → 关于本机中查看芯片。打开 DMG 后，将 Winway 拖入「应用程序」。</p>
+      <p class="signing-note">当前安装包未经过 Apple Developer ID 签名与公证，首次打开可能出现系统安全提示。请确认来自本项目 Releases，再按 macOS「隐私与安全性」提示处理。</p>
+      <a class="text-link" href="https://github.com/Capyhw/winway/releases/latest">查看发布说明、ZIP 与校验文件 <span aria-hidden="true">↗</span></a>
+    </section>
+
+    <section id="questions" class="faq wrap" aria-labelledby="questions-title">
+      <h2 id="questions-title">使用前，你可能想知道。</h2>
+      <details><summary>会改变其他 Mac 应用的快捷键吗？</summary><p>不会。Windows 与 macOS 预设只在 Winway 内生效。在设置中可以切换预设或单独修改某个按键，两套配置独立保存。Ctrl 指键盘上的 Control 键；部分键盘需要 Fn+F2。</p></details>
+      <details><summary>搜索为什么可能暂时没有结果？</summary><p>首次搜索需要建立索引，后续文件变化也可能有更新延迟。受保护目录需要相应的完全磁盘访问权限，内容索引存在文件类型和大小限制；结果不完整不代表文件不存在。详细步骤见 <a href="https://github.com/Capyhw/winway/blob/main/docs/search.md">搜索与权限说明</a>。</p></details>
+      <details><summary>能和 Finder 互相剪切、粘贴文件吗？</summary><p>当前文件剪贴板在 Winway 内共享，支持跨标签复制、剪切和粘贴，尚未与 Finder 的文件剪贴板互通。也不支持同名覆盖和目录合并；发生冲突时可以跳过、保留两者或取消。</p></details>
+      <details><summary>支持哪些 Mac？</summary><p>提供 Apple Silicon 和 Intel 两种安装包，最低编译目标为 macOS 13。项目仍在持续完善，不同系统版本的兼容性需要更多实机反馈。遇到问题可在 <a href="https://github.com/Capyhw/winway/issues">GitHub Issues</a> 提供系统版本、芯片类型和复现步骤。</p></details>
+    </section>
+  </main>
+  <footer class="footer wrap"><a class="brand" href="#"><img src="assets/icon.svg" width="26" height="26" alt="">Winway</a><p>把熟悉的操作，留在新的电脑上。</p><div><a href="https://github.com/Capyhw/winway">源码</a><a href="https://github.com/Capyhw/winway/issues">反馈问题</a><a href="https://github.com/Capyhw/winway/blob/main/README.md">使用文档</a></div></footer>
+</body>
+</html>
